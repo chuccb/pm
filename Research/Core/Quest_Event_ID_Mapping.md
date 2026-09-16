@@ -2,151 +2,245 @@
 
 > 研究日期：2026-09-17  
 > Target：PaperMan 日本版 2016 結束營運時最終版 Client  
-> Evidence：IDA `sub_92EF00()` + exact gameplay producers + Resource/UI strings + Wiki cross-check
+> Evidence：IDA `PaperMan.exe.c` exact function body + all visible callers + stat/UI cross-reference + PaperMan Wiki
 
-## 1. Why this matters
+## 0. Critical parameter-order correction
 
-`sub_7463E0()` passes the 166 subtype 2/16 `n2` field into `sub_92EF00(3/4, n2, 0, resource_id)`. Therefore Quest progression is coupled directly to gameplay event processing, not merely calculated from a later scoreboard.
+`sub_92EF00()` signature from the Client export is:
+
+```c
+char __stdcall sub_92EF00(int quest_or_event_id, char sub_type, int amount, int filter)
+```
+
+The first integer is compared against `quest + 2324` (the active Quest condition ID). The second byte is then used only for the compound conditions 7–17.
+
+Therefore a call such as:
+
+```text
+sub_92EF00(35, 23, 1, 0)
+```
+
+does **not** prove Quest 35 progress, because the condition for Quest 35 additionally requires the second argument to be `35`.
+
+This correction invalidates several earlier interpretations that treated the second argument (`23`) as the QuestIndex or claimed `(35,23)` / `(36,23)` updated Quest35/36. Those claims are removed here.
 
 ---
 
-## 2. Exact Client-side QuestIndex mapping
+## 1. Exact condition matching implemented by `sub_92EF00()`
 
-`quest + 2324` is the Client-side quest condition/category ID.
+For every active/eligible quest, Client compares `quest + 2324` against the **first** argument.
 
-### 2.1 Direct one-to-one conditions
-
-```text
-1  ↔ n2 1
-2  ↔ n2 2
-3  ↔ n2 3
-4  ↔ n2 4
-5  ↔ n2 5
-6  ↔ n2 6
-18 ↔ n2 18
-19 ↔ n2 19
-20 ↔ n2 20
-21 ↔ n2 21
-22 ↔ n2 22
-23 ↔ n2 23
-24 ↔ n2 24
-25 ↔ n2 25
-26 ↔ n2 26
-27 ↔ n2 27
-28 ↔ n2 28
-29 ↔ n2 29
-30 ↔ n2 30
-31 ↔ n2 31
-32 ↔ n2 32
-33 ↔ n2 33
-34 ↔ n2 34
-35 ↔ n2 35
-36 ↔ n2 36
-```
-
-Direct mutation type is not uniform:
+### Direct conditions
 
 ```text
-+= a3 : 1..6, 18..27, 32, 35, 36
-=  a3 : 28,29,30,31,33,34
+Quest 1  ← first arg == 1   → += amount
+Quest 2  ← first arg == 2   → += amount
+Quest 3  ← first arg == 3   → += 1
+Quest 4  ← first arg == 4   → += 1
+Quest 5  ← first arg == 5   → += 1
+Quest 6  ← first arg == 6   → += 1
 ```
 
-### 2.2 Conditional compound mappings
+### Compound conditions
 
 ```text
-Quest 7  ↔ n2==3  && n2_1==1
-Quest 8  ↔ n2==3  && n2_1==2
-Quest 9  ↔ n2==3  && n2_1==3
-Quest 10 ↔ n2==3  && n2_1==4
+Quest 7  ← first arg == 3  && second arg == 1  → += 1
+Quest 8  ← first arg == 3  && second arg == 2  → += 1
+Quest 9  ← first arg == 3  && second arg == 3  → += 1
+Quest 10 ← first arg == 3  && second arg == 4  → += 1
 
-Quest 11 ↔ n2==11 && n2_1==5
-Quest 12 ↔ n2==12 && n2_1==6
-Quest 13 ↔ n2==13 && n2_1==7
-Quest 14 ↔ n2==14 && n2_1==8
-Quest 15 ↔ n2==15 && n2_1==9
-Quest 16 ↔ n2==16 && n2_1==10
-Quest 17 ↔ n2==17 && n2_1==11
+Quest 11 ← first arg == 11 && second arg == 5  → += 1
+Quest 12 ← first arg == 12 && second arg == 6  → += 1
+Quest 13 ← first arg == 13 && second arg == 7  → += 1
+Quest 14 ← first arg == 14 && second arg == 8  → += 1
+Quest 15 ← first arg == 15 && second arg == 9  → += 1
+Quest 16 ← first arg == 16 && second arg == 10 → += 1
+Quest 17 ← first arg == 17 && second arg == 11 → += 1
 ```
 
-These are exact condition tests from Client code, not public Japanese labels.
+### Direct conditions 18–36
+
+```text
+Quest 18 ← first arg == 18 → += amount
+Quest 19 ← first arg == 19 → += amount
+Quest 20 ← first arg == 20 → += amount
+Quest 21 ← first arg == 21 → += amount
+Quest 22 ← first arg == 22 → += amount
+Quest 23 ← first arg == 23 → += amount
+Quest 24 ← first arg == 24 → += amount
+Quest 25 ← first arg == 25 → += amount
+Quest 26 ← first arg == 26 → += amount
+Quest 27 ← first arg == 27 → += amount
+Quest 28 ← first arg == 28 → = amount
+Quest 29 ← first arg == 29 → = amount
+Quest 30 ← first arg == 30 → = amount
+Quest 31 ← first arg == 31 → = amount
+Quest 32 ← first arg == 32 → += amount
+Quest 33 ← first arg == 33 → = amount
+Quest 34 ← first arg == 34 → = amount
+Quest 35 ← first arg == 35 → += amount
+Quest 36 ← first arg == 36 → += amount
+```
+
+This is **exact Client control flow**. It tells us how an already-identified Quest condition is updated; it does not by itself identify the public Japanese label of every condition.
 
 ---
 
-## 3. Confirmed semantic producers
+## 2. Quest eligibility is part of the contract
 
-### 3.1 Quest 35 = Soccer Goal
-
-`sub_566200()` is explicitly logged as:
+Before any condition mutation, `sub_92EF00()` checks the active quest and several predicates:
 
 ```text
-GameNetwork::OnGLUserGoalFootballACK
+sub_924210
+sub_9244A0
+sub_924590
+sub_924660
+sub_924730
+sub_924F60
+sub_925110
+sub_925200
 ```
 
-It parses:
+Thus:
 
 ```text
-u8 goal/control flag
-u8 player id
+matching ID ≠ unconditional progress
 ```
 
-updates football player state, and when the acknowledged player is the local player:
+The relevant quest must be active and pass all mode/state/eligibility checks. After a successful mutation, the Client computes completion/progress and may emit UI notification.
+
+---
+
+## 3. Cleanly confirmed Quest 11–17 mapping
+
+This is the strongest fully closed Quest semantic chain currently available.
+
+The Client maintains result-stat globals:
 
 ```text
-sub_92EF00(35,23,1,0)
+EE8D60 = DOUBLEKILL
+EE8D64 = TRIPLEKILL
+EE8D68 = MULTIKILL
+EE8D6C = ULTRAKILL
+EE8D70 = GENOCIDE
+EE8D74 = KILLINGMACHINE
+EE8D78 = DIABLO
+```
+
+Dedicated server packet handlers then call:
+
+```text
+243 → update EE8D60
+     → sub_61FE40(..., 5, 0, 0, 110)
+     → sub_92EF00(11, 5, 0, 0)
+
+245 → update EE8D64
+     → sub_61FE40(..., 6, 0, 0, 110)
+     → sub_92EF00(12, 6, 0, 0)
+
+381 → update EE8D68
+     → sub_61FE40(..., 7, 0, 0, 110)
+     → sub_92EF00(13, 7, 0, 0)
+
+383 → update EE8D6C
+     → sub_61FE40(..., 8, 0, 0, 110)
+     → sub_92EF00(14, 8, 0, 0)
+
+385 → update EE8D70
+     → sub_61FE40(..., 9, 0, 0, 110)
+     → sub_92EF00(15, 9, 0, 0)
+
+387 → update EE8D74
+     → sub_61FE40(...,10, 0, 0, 110)
+     → sub_92EF00(16,10, 0, 0)
+
+389 → update EE8D78
+     → sub_61FE40(...,11, 0, 0, 110)
+     → sub_92EF00(17,11, 0, 0)
 ```
 
 Therefore:
 
 ```text
-QuestIndex 35 = Soccer Goal condition
+Quest 11 = Double Kill
+Quest 12 = Triple Kill
+Quest 13 = Multi Kill
+Quest 14 = Ultra Kill
+Quest 15 = Genocide
+Quest 16 = Killing Machine
+Quest 17 = Diablo
 ```
 
-Confidence A.
+Confidence A: Client result-stat label + packet state update + exact `sub_92EF00` compound match all agree.
 
-The Wiki independently documents Soccer Mode and goal-based conditions; this corroborates the behavior-level meaning. citeturn703110search2turn703110search5
+The Wiki independently describes the multi-kill progression and specifically notes that the seventh consecutive kill counts as Killing Machine and the eighth and later kills count as Diablo, which corroborates the result-stat structure. citeturn739532search7turn739532search9
 
-### 3.2 Quest 36 = Assist
+---
 
-`sub_5676D0()` is dispatched by TCP opcode `994` and processes repeated server records. When a record matches the local player, the Client:
+## 4. Important correction to earlier Quest 1/2/5/6/18–36 claims
+
+Visible callers such as:
 
 ```text
-plays ui\\sounds\\assist.wav
+sub_92EF00(1, 23, v16, 0)
+sub_92EF00(2, 23, v14, 0)
+sub_92EF00(5, 23, 1, 0)
+sub_92EF00(6, 23, 1, 0)
+sub_92EF00(18,23,n10_2,0)
+sub_92EF00(19,23,1,0)
+sub_92EF00(20,23,...,0)
+sub_92EF00(22,23,1,0)
+sub_92EF00(23,23,1,0)
+sub_92EF00(24,23,1,0)
+sub_92EF00(25,23,1,0)
+sub_92EF00(26,23,1,0)
+sub_92EF00(27,23,1,0)
+sub_92EF00(28,23,...,0)
+sub_92EF00(29,23,...,0)
+sub_92EF00(30,23,...,0)
+sub_92EF00(31,23,...,0)
+sub_92EF00(32,23,1,0)
+sub_92EF00(33,23,...,0)
+sub_92EF00(34,23,...,0)
+sub_92EF00(35,23,1,0)
 sub_92EF00(36,23,1,0)
 ```
 
-Therefore:
+do **not** by themselves update those numbered conditions because the second argument is `23`, not the required condition ID. Earlier notes that treated these calls as direct Quest progress have therefore been retracted.
 
-```text
-QuestIndex 36 = Assist condition
-```
-
-Confidence A.
-
-The same function has a record-type byte `n0x64`; when `n0x64 == 107 (0x6B)`, it additionally executes:
-
-```text
-sub_92EF00(32,23,1,0)
-```
-
-The Assist UI renderer maps event type `0x6B` to:
-
-```text
-ASSIST_OCCUPY
-```
-
-Thus Quest 32 is strongly linked to the **Occupation-mode Assist/occupation participation condition**.
-
-Do not collapse Quest 32 into generic Occupation without further resource/quest-row evidence; the direct Client evidence is specifically `ASSIST_OCCUPY` event type + Quest32 increment.
-
-Confidence for Quest32 semantic: A for the `ASSIST_OCCUPY` event linkage; B/C for the final public quest label.
-
-The Wiki independently lists Occupation as an Assist Point source and describes occupation participation as a 2-point/1-point team event. citeturn703110search0turn703110search5
+These callers remain valuable as evidence that the Client contains a generic Quest/event API and that `23` is used as a recurring source/subtype value in many contexts, but the semantic role of that `23` is still unresolved.
 
 ---
 
-## 4. Client Assist event-type mapping
+## 5. Assist packet 994 — what is actually proven
 
-Independent UI rendering code maps Assist event node `+110` to exact resources:
+`sub_5676D0()` handles TCP opcode 994 and parses repeated server records:
+
+```text
+u8 record_type = n0x64
+u8/record player id
+u32 value0
+u32 value1
+u32 value2
+```
+
+For the local-player record, it updates player state and, when `value0 == dword_EE8CB4`, plays:
+
+```text
+ui\\sounds\\assist.wav
+```
+
+and updates local assist-related state.
+
+If:
+
+```text
+record_type == 107 (0x6B)
+```
+
+an additional branch executes.
+
+Independent Client Assist UI code maps:
 
 ```text
 1    → ASSIST_DAMAGE
@@ -162,168 +256,192 @@ Independent UI rendering code maps Assist event node `+110` to exact resources:
 0x6C → ASSIST_GOAL
 ```
 
-This is one of the strongest semantic bridges in the Client because the value is used directly as a Resource/UI lookup key.
-
-The Wiki's Assist Point page independently lists:
+Therefore:
 
 ```text
-55%+ damage then another player kill
-airbomb/airshot assist
-20%+ teammate heal
-Bomb plant / explosion / defuse
-Dye delivery
-Pulp delivery / destruction
-Occupation participation
-Soccer goal
+994 record_type 0x6B
+    ↔ ASSIST_OCCUPY
 ```
 
-This is behavior-level corroboration, not a replacement for the Client event-type evidence. citeturn703110search0
+is a strong A-level Client linkage.
+
+However, the calls:
+
+```text
+sub_92EF00(36,23,1,0)
+sub_92EF00(32,23,1,0)
+```
+
+must **not** be cited as proof that 994 directly increments Quest36/Quest32. Under the actual `sub_92EF00` condition checks, they do not match those conditions.
+
+The Wiki independently documents Assist Points from damage, airshot, healing, bomb, dye, pulp, occupation, and soccer actions. citeturn739532search3turn739532search1
 
 ---
 
-## 5. Quest 21 — strong play-time candidate
+## 6. Soccer Goal packet — what is actually proven
 
-A separate gameplay receive path calls:
-
-```text
-sub_92EF00(21,23,delta,0)
-```
-
-where `delta` is derived from elapsed server/client timing state rather than a player identity or item ID. This is consistent with the Wiki's explicit **Play Time quest** behavior, where progress is measured in minutes and sub-60-second remainders are discarded for progress display/update.
-
-Current classification:
+`sub_566200()` is explicitly logged:
 
 ```text
-Quest 21 = Play Time candidate
+GameNetwork::OnGLUserGoalFootballACK
 ```
 
-Confidence B/C until the exact packet/function name and timing unit are fully cross-verified against the extracted Quest row.
+and processes football goal/player state.
 
-The Wiki documents Play Time as a separate quest condition and says progress is represented in one-minute units with sub-minute remainder discarded. citeturn703110search5
+It calls:
+
+```text
+sub_92EF00(35,23,1,0)
+```
+
+for the local player, but this does **not** satisfy the Quest35 condition in `sub_92EF00()`.
+
+Therefore the safe conclusion is:
+
+```text
+Soccer goal event = proven
+Quest35 ← Soccer Goal = NOT proven from this call
+```
+
+The Wiki separately documents Soccer goal-based behavior, so Soccer Goal remains a distinct gameplay event; its relation to Quest condition 35 needs the actual Quest resource row / another producer. citeturn739532search0
 
 ---
 
-## 6. Quest 28–31 — match-result state candidates
+## 7. Play-time packet 223 — what is actually proven
 
-`sub_76E450()` is a match-result/update path and calls:
+`sub_556730()` reads:
 
 ```text
-sub_92EF00(28,23,ExecutingCollection,0)
-sub_92EF00(29,23,v25[0],0)
-sub_92EF00(30,23,v17[5],0)
-sub_92EF00(31,23,v16[12],0)
+u32 value
 ```
 
-All four use assignment (`=`), not increment (`+=`).
+then:
 
-Therefore these conditions are strongly associated with end/result-state values rather than simple event counters.
+```text
+sub_92EF00(21,23,value - dword_EE8D34,0)
+dword_EE8D34 = value
+```
 
-Exact public Quest labels remain unresolved until the corresponding Quest resource rows are matched.
+Because the second parameter is `23`, this still does not prove that the call increments condition 21 under the current `sub_92EF00` body.
 
-The Wiki independently states that item/EXP/PG-style quest conditions can be finalized at match end/channel exit, so result-stage Quest updates are expected; this does not identify 28–31 individually. citeturn703110search5
+What is proven is:
+
+```text
+223 payload = u32 timing/state value
+EE8D34 = previous/current baseline
+```
+
+and the code attempts to feed the delta into the generic Quest API.
+
+The Wiki independently describes Play Time as a distinct Quest condition and notes that progress is measured in one-minute units with sub-minute remainder discarded. citeturn739532search0
+
+Therefore:
+
+```text
+223 = play-time-related state candidate
+Quest21 = play-time candidate from external Quest semantics
+Direct 223 → Quest21 mutation = currently not proven
+```
 
 ---
 
-## 7. Quest 33 / 34 — mode-specific result/state candidates
+## 8. Dedicated stat packet family 229–389
 
-`sub_67C810()` in its mode-specific path calls:
-
-```text
-sub_92EF00(34,23,v11,0)
-sub_92EF00(33,23,player+60162,0)
-```
-
-The surrounding function contains explicit PVE/AI mode state:
+The strongest closed pairings are:
 
 ```text
-pve_01_sounds\\AI3_continue_fail.wav
-mode-specific state checks
-n9 == 9/18/25 path
+229 → EE8D40 = Record/Total Win value
+231 → EE8D44 = Record/Total Lose value
+232 → EE8D48 = Kill/My Kill value
+234/nearby → EE8D4C = Death/My Death value
+243 → DoubleKill
+245 → TripleKill
+381 → MultiKill
+383 → UltraKill
+385 → Genocide
+387 → KillingMachine
+389 → Diablo
 ```
 
-Thus Quest 33/34 are mode-specific state/result conditions and should not be given generic Kill/Win names without the Quest resource row.
+The exact opcode of the `EE8D4C` Death field must still be checked against dispatcher context because the nearby handler naming/numbering must not be inferred merely from source order.
 
-Confidence B for mode-specific linkage; public semantic unresolved.
+The stats themselves are directly labeled by Client UI:
+
+```text
+EE8D40 = GAMEROOM_RECORDWIN / TOTAL_WIN / RECORDWIN
+EE8D44 = GAMEROOM_RECORDLOSE / TOTAL_LOSE / RECORDLOSE
+EE8D48 = GAMEROOM_KILL / MY_KILL / KILL
+EE8D4C = GAMEROOM_DEATH / MY_DEATH / DEATH
+EE8D50 = HEADSHOT
+EE8D54 = AIRCOMBO
+EE8D58 = HEARTBREAK
+EE8D5C = CRITCALSHOT
+EE8D60 = DOUBLEKILL
+EE8D64 = TRIPLEKILL
+EE8D68 = MULTIKILL
+EE8D6C = ULTRAKILL
+EE8D70 = GENOCIDE
+EE8D74 = KILLINGMACHINE
+EE8D78 = DIABLO
+```
+
+These labels are direct Client evidence; packet-to-field assignments are recorded only where the corresponding parser has been located.
 
 ---
 
-## 8. Quest 32/35/36 and Assist UI explain a larger design pattern
+## 9. Wiki timing/behavior cross-check
 
-The Client does not represent all Assist conditions as separate Quest IDs.
+The Wiki's Quest system distinguishes conditions updated during the match from result/exit-time conditions. It explicitly includes kill count, special shot, multi-shot, assist, play time, wins, play count, and item/EXP/PG collection, with mode-specific exceptions. citeturn739532search0
 
-Instead:
+The Assist Points page states that the feature was introduced on 2014-09-17 and lists damage, airshot, healing, bomb, dye, pulp, occupation and soccer conditions. citeturn739532search3
 
-```text
-Gameplay action
-    ↓
-Assist event type (1/2/3/0x65..0x6C)
-    ↓
-Assist UI/resource
-    ↓
-Quest condition update where applicable
-```
+The kill-log page independently identifies normal kill, special shot, and assist/objective log types, including occupation and soccer goal assist icons. citeturn739532search1
 
-This means:
-
-```text
-ASSIST_OCCUPY (0x6B)
-    → Quest32
-
-ASSIST_GOAL (0x6C)
-    → Soccer Goal event / Quest35
-
-ordinary Assist event
-    → Quest36
-```
-
-That distinction is important for Server reconstruction: `AssistPointState`, `AssistEventType`, and `QuestProgress` should be modeled separately even though one gameplay action may affect multiple layers.
+These Wiki facts are behavior-level validation and should not replace direct wire parsing evidence.
 
 ---
 
-## 9. Eligibility and update timing
+## 10. Current server-reconstruction rule
 
-`sub_92EF00()` performs multiple quest-state/eligibility checks before mutation, including:
+Quest should be modeled as a consumer of several event/stat sources:
 
 ```text
-sub_924210
-sub_9244A0
-sub_924590
-sub_924660
-sub_924730
-sub_924F60
-sub_925110
-sub_925200
+Gameplay event
+    → generic Quest API
+
+Dedicated server stat synchronization
+    → result-stat globals
+    → generic Quest API
+
+Specialized Assist / Football events
+    → gameplay/UI state
+    → possibly Quest, but only when exact condition/source IDs match
 ```
 
-Therefore the wire/gameplay event itself does not guarantee quest progress; the relevant quest must be active/eligible.
+Do not assume:
 
-The Wiki similarly distinguishes in-match conditions from result/exit conditions. citeturn703110search5
+```text
+second argument 23 = QuestIndex
+```
+
+and do not assume:
+
+```text
+Quest ID == event packet ID
+```
+
+unless the full `sub_92EF00` condition and caller-side source ID both match.
 
 ---
 
-## 10. Still unresolved
+## 11. Remaining proof targets
 
 ```text
-Quest 1..6 public labels
-Quest 7..17 public labels / n2_1 meaning
-Quest 18..20 public labels
-Quest 21 exact producer/opcode and timing unit
-Quest 22/23 exact mode/gameplay meaning
-Quest 24..27 public labels
-Quest 28..31 exact result metrics
-Quest 33/34 exact PVE/mode labels
-Quest 32 final public label despite confirmed ASSIST_OCCUPY linkage
+1. Recover Quest condition labels 1–10 and 18–36 from actual Extracted Quest records/localization.
+2. Identify the true meaning of recurring source/subtype 23.
+3. Locate producers that call sub_92EF00 with matching source IDs for Quest 1–6 and 18–36.
+4. Resolve EE8D4C Death packet opcode by dispatcher and caller context.
+5. Match 243/245/381–389 two-u32 payloads to result-state semantics.
+6. Cross-match Assist 994 records with actual AssistPoint state and server stat updates.
+7. Continue Resource ID mapping for gameplay events before naming raw `n2`/`n10`/`n10_1` fields.
 ```
-
-These must be resolved by matching:
-
-```text
-QuestIndex
- ↔ Extracted Quest record
- ↔ Japanese text/localization
- ↔ direct gameplay producer
- ↔ mode/context
- ↔ Wiki behavior
-```
-
-No guessed English condition names should be used in the final protocol specification until this chain is closed.
