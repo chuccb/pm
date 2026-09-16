@@ -2,23 +2,22 @@
 
 > 研究日期：2026-09-16
 >
-> 本文件專門收斂「Room UI → 設定值 → Request → ACK → Client 狀態」這一層。重點不是只記 opcode，而是把每個欄位一路追到真正讀寫的位置。
+> 本文件專門收斂「Room UI → selector/value → Request → ACK → Client 狀態」這一層。重點是資料流，而不是只依 packet name 猜 enum。
 
-## 1. 三方證據規則
+## 1. 證據等級與命名原則
 
-本文件使用三種證據：
+- **[C]**：IDA Hex-Rays `PaperMan.exe.c` 的封包建立、解析、函式資料流、物件欄位。
+- **[W]**：PaperMan Wiki 的玩家可見規則與 Room 設定。
+- **[R]**：`Extracted/` 實際資源。
+- **[X]**：跨來源推導；若仍未完全封死，必須明確標記 OPEN。
 
-- **[C] IDA Hex-Rays `PaperMan.exe.c`**：封包建立、解析、函式資料流、物件欄位。
-- **[W] PaperMan Wiki**：玩家實際可見的 Room 設定與模式規則。
-- **[R] Extracted 資源**：客戶端實際使用的地圖／UI／資料資源。
-
-命名原則：沒有被資料流直接封死的欄位，不強行命名成伺服器 enum；優先使用 `*_value`、`selector_value`、`control_flag` 這類可逆命名。
+命名原則：先保留 `*_value`、`selector_value`、`packed_flags`、`unknown_*` 等可逆名稱；沒有證據時不把數字直接命名成伺服器 enum。
 
 ---
 
-## 2. Room UI 實際存在的設定控制
+## 2. Room UI 的實際控制面
 
-IDA 中同一套 Room UI 明確會尋找以下 resource key：
+C 中同一套 Room UI 明確查找並操作：
 
 ```text
 GAMEROOM_START
@@ -40,13 +39,9 @@ GAMEROOM_MASTERROOM
 GAMEROOM_LOCALROOM
 ```
 
-這不是單純從變數名稱猜測：Room UI 的事件 dispatch 會逐一比較這些 key，並依 key 進入對應操作。fileciteturn330file1L141-L253
+Room UI event dispatch 會依這些 key 選擇對應操作，而不是所有控制共用一條 generic path。**[C]**
 
-另一段初始化／刷新流程則直接取得 `GAMEROOM_SCROLL_MAP`、`GAMEROOM_SCROLL_RULE`、`GAMEROOM_SCROLL_TIME`、`GAMEROOM_SCROLL_OBJECT`、`GAMEROOM_ITEM`、`GAMEROOM_TEAMBALANCE` 等物件，並呼叫其 UI virtual method 更新狀態。fileciteturn329file1L245-L318
-
-### Wiki 對這一層的獨立確認
-
-Wiki 的 Room information 明確列出玩家可以看到的：
+Wiki 的 Room information 也明確列出：
 
 ```text
 モード
@@ -62,66 +57,15 @@ Wiki 的 Room information 明確列出玩家可以看到的：
 ノースキルモード
 ```
 
-且模式列表與可選規則會隨版本／模式改變。[W] citeturn606128search0
+**[W]** citeturn606128search0
 
-因此目前可以把 UI 層理解成：
-
-```text
-Room
-├─ map selector
-├─ rule / victory-condition selector
-├─ time selector
-├─ object / gimmick-related selector
-├─ item / no-item
-├─ team balance
-├─ team shuffle
-├─ no-skill variants
-└─ other room flags
-```
-
-**[W+C] 這個層級的存在已完全對上。**
+因此「Room UI 的 selector / flag 層」在 C 與 Wiki 兩邊獨立成立。
 
 ---
 
-## 3. `GR_MAPCHANGE_REQ/ACK`：Map selector value
+## 3. 所有 selector 的共同資料模型：Index 與 Value 分離
 
-### 3.1 Request 121
-
-`sub_56E480` 最終呼叫：
-
-```c
-Packet::possible_ctor_or_dtor_0(v2, 121);
-sub_592920(v2, a1);
-sub_555090(&dword_1321D00, v2);
-```
-
-所以：
-
-```text
-121 GR_MAPCHANGE_REQ
-+0x00 u8 map_value
-payload = 1 byte
-```
-
-[C]
-
-### 3.2 ACK 122
-
-`sub_56E530` 讀出一個 byte 後直接呼叫：
-
-```c
-sub_42FC50(dword_EA10D0, v2);
-```
-
-`sub_42FC50()` 取得：
-
-```text
-GAMEROOM_SCROLL_MAP
-```
-
-然後以 `sub_4387B0()` 逐項比較 `map_value`；命中後選中該項目，再更新 Room state。[C] 此資料流已在 `Map_And_Room.md` 詳述。
-
-### 3.3 列表項目的真正 value
+多個 Room scroll control 使用同一種 entry 結構。
 
 `sub_4387B0()`：
 
@@ -129,9 +73,83 @@ GAMEROOM_SCROLL_MAP
 return *(*(this + 33) + 40 * a2 + 36);
 ```
 
-因此 Room selector list 是以 **40-byte entry** 組成，而其可傳輸／選取 value 在 entry `+36`。fileciteturn336file0L100-L108
+代表：
 
-### 3.4 Room object 對 Map value 的儲存欄位
+```text
+entry stride = 40 bytes
+entry value  = +36
+```
+
+**[C]**
+
+因此必須區分：
+
+```text
+OptionIndex      // UI list position
+OptionValue      // 真正存取／傳輸的 value
+```
+
+不能假設：
+
+```text
+OptionIndex == OptionValue
+```
+
+這個 distinction 是整個 Room protocol reverse engineering 的核心。
+
+---
+
+## 4. `GR_MAPCHANGE_REQ/ACK (121/122)`：Map selector value
+
+### 4.1 Wire format
+
+Request：
+
+```c
+Packet::possible_ctor_or_dtor_0(v2, 121);
+sub_592920(v2, a1);
+```
+
+ACK receiver：
+
+```c
+sub_592940(a1, &v2);
+sub_42FC50(dword_EA10D0, v2);
+```
+
+因此：
+
+```text
+121 GR_MAPCHANGE_REQ
++0x00 u8 map_value
+
+122 GR_MAPCHANGE_ACK
++0x00 u8 map_value
+```
+
+**[C]**
+
+### 4.2 ACK 會回到 `GAMEROOM_SCROLL_MAP`
+
+`sub_42FC50()` 取得：
+
+```text
+GAMEROOM_SCROLL_MAP
+```
+
+再用 `sub_4387B0()` 找 `entry value == map_value` 的項目，找到後透過 `sub_6B9B10()` 選中。
+
+因此：
+
+```text
+121/122 field
+    ↓
+GAMEROOM_SCROLL_MAP entry value
+```
+
+不是任意 status byte。
+
+### 4.3 Object field 與本地 cache
 
 `sub_540260()`：
 
@@ -145,154 +163,149 @@ return *(this + 130);
 *(this + 130) = a2;
 ```
 
-所以目前可以安全寫成：
+因此目前最安全的命名是：
 
 ```text
-Room/Player object +130 = current selector value
+Room/Player object +130 = current_map_selector_value
 ```
 
-而不是直接叫 `map_id`；`map_id` 是否等同於 resource map identifier，仍需再閉合。[C] fileciteturn336file3L661-L665 fileciteturn336file4L892-L896
+是否完全等同於 `map_id`，仍不能只靠這一層下結論。
 
-### 3.5 本地 resource cache
-
-Client 會把目前的 `sub_540260()` 寫到：
+Client 還會把該 byte 寫進：
 
 ```text
-cfg\Map.dat
+cfg\\Map.dat
 ```
 
-且是以 1 byte 寫入。fileciteturn336file3L548-L554
-
-[R+C] `Extracted/map/maplist.dat` 本身是實際二進位地圖清單，內容可看到 UTF-16 map resource path，例如：
+而 `Extracted/map/maplist.dat` 確實是實際的二進位 map inventory，可看到例如：
 
 ```text
-maps\TU_01_tutorial.pmm
+maps\\TU_01_tutorial.pmm
 ```
 
-因此 `GAMEROOM_SCROLL_MAP` 並不是憑空建立的 UI list，而是與客戶端實際 map resource inventory 相連。[R]
-
-**目前最穩固的模型：**
+因此：
 
 ```text
-maplist.dat / map resources
+[R] maplist.dat / map resource
         ↓
-GAMEROOM_SCROLL_MAP
+[C] GAMEROOM_SCROLL_MAP
         ↓
-40-byte entries, value @ +36
+[C] 40-byte entry, value @ +36
         ↓
-current Room value @ object +130
+[C] object +130
         ↓
-121 / 122 carries that value as u8
-        ↓
-Map selection synchronized to clients
+[C] 121/122 u8
 ```
+
+這是目前 Room → map 的三方最完整閉環之一。
 
 ---
 
-## 4. `GR_TIMECHANGE_REQ/ACK`：Time selector value
+## 5. `GR_START_REQ (129)`：其 byte 也由 Map selector 產生
 
-### 4.1 Opcode 已被名稱直接封死
+`sub_4320F0()` 在通過 Start precondition 後呼叫：
 
-Packet registration 明確為：
+```c
+n125 = sub_437060(this);
+*(this + 112) = 6;
+sub_5627C0(n125);
+```
+
+`sub_437060()` 明確取得：
+
+```text
+GAMEROOM_SCROLL_MAP
+```
+
+並在至少 `n124 == 125` 的 path 中：
+
+```c
+v4 = (v13[34] - v13[33]) / 40;
+v11 = rand() % (v4 - 2);
+return sub_4387B0(v13, v11);
+```
+
+所以：
+
+```text
+129 GR_START_REQ
++0x00 u8 start_map_value / start_parameter
+```
+
+其中「payload 由 Map selector value 產生」是 **[C 高可信]**；「server side field 應命名成 map id」仍應保持 OPEN。
+
+因此不能把 129 byte 當成 generic `start_flag`。
+
+---
+
+## 6. `GR_TIMECHANGE_REQ/ACK (173/174)`：Time selector value
+
+Packet registration 明確是：
 
 ```text
 173 GR_TIMECHANGE_REQ
 174 GR_TIMECHANGE_ACK
 ```
 
-C registration：fileciteturn344file0L24-L47
+**[C]**
 
-### 4.2 Request 173
-
-`sub_56F600(char a1)`：
+Request：
 
 ```c
 Packet::possible_ctor_or_dtor_0(v2, 173);
 sub_592920(v2, a1);
-sub_555090(&dword_1321D00, v2);
 ```
 
-所以：
-
-```text
-173 GR_TIMECHANGE_REQ
-+0x00 u8 time_value
-payload = 1 byte
-```
-
-### 4.3 ACK 174
-
-`sub_56F6B0()`：
+ACK：
 
 ```c
 sub_592940(a1, &v2);
-return sub_430920(dword_EA10D0, v2);
+sub_430920(dword_EA10D0, v2);
 ```
-
-[C] 174 的 payload 也是一個 u8。
-
-### 4.4 `sub_430920()` 封死了它是哪個 selector
-
-核心流程：
-
-```c
-*(this + 112) = 0;
-i_2 = sub_407E80(this_15, *(this + 213));
-*(i_2 + 136) = a2;
-...
-GAMEROOM_SCROLL_TIME
-...
-sub_6B9B10(v15, 0);
-for ( i = 0; ; ++i )
-{
-    if ( sub_4387B0(v15, i) == a2 )
-        return sub_6B9B10(v15, i);
-}
-```
-
-因此：
-
-```text
-173/174 u8
-    = GAMEROOM_SCROLL_TIME 的 selector value
-    = stored at object +136
-```
-
-而不是「剩餘時間」或「時間秒數」本身。[C]
-
-這是很重要的差別：Room UI 選項通常是 **selector value**，真正玩家可見的 `10/20/30 min` 等文字是 selector entry／mode UI 的另一層語意。
-
-Wiki 確實確認多個模式有可選的制限時間，例如 Team Survival `10/20/30分`、Team Tactical `3/4/5分` 等。[W] citeturn606128search0
 
 所以：
 
 ```text
-u8 time_value ≠ 必然直接等於「分鐘」
+173/174 +0x00 u8 time_value
 ```
 
-在伺服器重建中應保留 selector mapping，而不是直接 hardcode `value = minutes`。
+`sub_430920()` 會：
+
+```c
+*(i_2 + 136) = a2;
+```
+
+接著取得：
+
+```text
+GAMEROOM_SCROLL_TIME
+```
+
+再以 `sub_4387B0()` 找相同 value 的 entry 並選中。
+
+因此可以封死：
+
+```text
+Room/Player object +136 = current_time_selector_value
+```
+
+**重要：** `time_value` 目前不能直接命名為 `minutes`。Wiki 雖然確認多模式存在例如 `10/20/30分`、`3/4/5分` 的時間選項，但 packet field 是 selector value，不代表其數字必然就是分鐘數。[W] citeturn606128search0
+
+Server 應保留：
+
+```text
+TimeOptionIndex
+TimeOptionValue
+TimeMinutes
+```
+
+三者分離。
 
 ---
 
-## 5. `GR_RULECHANGE_REQ/ACK`：Rule / victory-condition selector
+## 7. `GR_RULECHANGE_REQ/ACK (169/170)`：Rule selector value
 
-### 5.1 Packet 格式
-
-Request 169：
-
-```c
-Packet::possible_ctor_or_dtor_0(v2, 169);
-sub_592920(v2, a1);
-```
-
-ACK 170：
-
-```c
-sub_592940(a1, &n17);
-sub_42FE50(dword_EA10D0, n17);
-```
-
-所以：
+Wire：
 
 ```text
 169 GR_RULECHANGE_REQ
@@ -302,82 +315,80 @@ sub_42FE50(dword_EA10D0, n17);
 +0x00 u8 rule_value
 ```
 
-[C] fileciteturn341file0L24-L47
-
-### 5.2 ACK 的資料流
-
-`sub_42FE50()` 不是單純改一個 byte：它會把收到的 rule value 套到 Room/player state，並重新選擇：
-
-```text
-GAMEROOM_SCROLL_RULE
-```
-
-其中 selector entry value 同樣透過：
+Request：
 
 ```c
-sub_4387B0(...)
+Packet::possible_ctor_or_dtor_0(v2, 169);
+sub_592920(v2, a1);
 ```
 
-找回 UI list item，再呼叫 `sub_6B9B10()` 選中。[C]
+ACK：
 
-因此目前最安全命名：
+```c
+sub_592940(a1, &n17);
+sub_42FE50(dword_EA10D0, n17);
+```
+
+**[C]**
+
+### 7.1 `sub_42FE50()` 的資料流
+
+收到 `rule_value` 後，client 不是只更新 UI，而是：
 
 ```text
 rule_value
-rule_selector_value
+  ↓
+sub_426930(...)
+  ↓
+Room/Player object +130
+  ↓
+GAMEROOM_SCROLL_RULE
+  ↓
+sub_4387B0() 找 entry value
+  ↓
+sub_6B9B10() 選中 UI item
 ```
 
-而不是：
+另外 `GAMEROOM_USERSLOTS` 等 Room state 也會在這條 path 上同步調整。
 
-```text
-mode_id
-win_type
-kill_limit
-```
+### 7.2 一個重要的 list-index clue
 
-後三者都可能只是 selector value 的下游解釋。
-
-### 5.3 一個關鍵 semantic clue：`n11 == 11`
-
-Start UI flow 中會取：
+Start path 中有：
 
 ```c
 v77 = v123[36];
 n11 = sub_4387B0(v123, v77);
-if ( n11 == 11 )
-    sub_4355D0(this);
-else if ( teamshuffle enabled ... )
-    sub_435520(this);
-else
-    sub_42F5E0(this);
 ```
 
-這證明 `sub_4387B0(v123, current_value)` 可以把 current selector value 映射回其 list position/index。
-
-因此：
+此處 `v123[36]` 是 current selector value，而 `sub_4387B0()` 接受的是 index，表示 caller 可能在做：
 
 ```text
-current selector value
-    ↔ list entry value
-    ↔ list index
+current value → 找回 list index
 ```
 
-是這套 Room UI 的核心資料模型。
+因此 selector value 與 list index 在 client 內部確實是兩個不同概念。
 
-但 **`index == 11` 的實際玩家語意目前仍未完全封死**，因此不要在 Server 中把 11 直接命名成某個 mode/rule enum。[C]
+`n11 == 11` 會走特殊 Start path，但 **index 11 的玩家語意目前未封死**，不能直接寫成某個 mode/rule enum。
 
 ---
 
-## 6. `GR_WINCHANGE_REQ/ACK`：另一個 16-bit Room selector
+## 8. `GR_WINCHANGE_REQ/ACK (171/172)`：名稱不能直接當成 `kill_limit`
 
-Packet registration：
+這一段需要修正先前容易產生的錯誤推導。
+
+Registration：
 
 ```text
 171 GR_WINCHANGE_REQ
 172 GR_WINCHANGE_ACK
 ```
 
-[C] fileciteturn344file0L1-L23
+Wire：
+
+```text
+171 +0x00 u16
+172 +0x00 u16
+```
 
 Request：
 
@@ -390,26 +401,66 @@ ACK：
 
 ```c
 sub_592A00(a1, &v2);
-return sub_430720(dword_EA10D0, v2);
+sub_430720(dword_EA10D0, v2);
 ```
 
-因此：
+**[C]**
+
+而 `sub_430720()` 明確處理：
 
 ```text
-171/172 payload = u16
+GAMEROOM_SCROLL_OBJECT
 ```
 
-[C] fileciteturn341file0L50-L74
+並把收到的值直接存入：
 
-`sub_430720()` 所處理的是 Room 設定物件，但目前未完成它與 `GAMEROOM_SCROLL_RULE` / `GAMEROOM_SCROLL_TIME` 的完全對應。因此現階段不要直接把它叫 `kill_limit`。
+```c
+*(RoomPlayerObject + 144) = a2;
+```
 
-這一點尤其重要，因為 Wiki 顯示不同 mode 的「勝利條件」數值型態確實不同：例如 Team Survival 是 `50/100/200 Kill`，Team Tactical 是 `3/5/7/10/12/15 Round`。 [W] citeturn606128search0
+然後同樣使用：
 
-所以 **u16 很可能是某個 rule-specific selector/value，而不是固定單一單位。**
+```c
+sub_4387B0(...)
+sub_6B9B10(...)
+```
+
+找回 selector entry。
+
+因此目前最安全結論是：
+
+```text
+171/172
+    = 16-bit value for GAMEROOM_SCROLL_OBJECT
+```
+
+而 **不是** 已證明的：
+
+```text
+kill_limit
+round_limit
+win_type
+```
+
+### 為什麼 packet name 不能覆蓋資料流證據
+
+`GR_WINCHANGE` 是歷史命名；client 真正的接收函式把它送進 `GAMEROOM_SCROLL_OBJECT`。Server reverse engineering 應優先服從實際 data flow，而不是只看名字。
+
+Wiki 確實有各 mode 不同的勝利條件，例如：
+
+```text
+Team Survival: 50/100/200 Kill
+Team Tactical: 3/5/7/10/12/15 Round
+new占領: 300/500/700/1000 Point
+```
+
+[W] citeturn606128search0
+
+這些 rule-specific values 與 `GAMEROOM_SCROLL_OBJECT` 的 16-bit field 是否是一一對應，目前仍需繼續從 `sub_430720()` caller、resource entry 與 mode UI 完整閉合。
 
 ---
 
-## 7. `GR_ITEMCHANGE_REQ/ACK`：Item + packed flag
+## 9. `GR_ITEMCHANGE_REQ/ACK (175/176)`：u8 packed flags
 
 Registration：
 
@@ -418,18 +469,48 @@ Registration：
 176 GR_ITEMCHANGE_ACK
 ```
 
-[C] fileciteturn344file0L50-L69
-
-Request `sub_56F6E0()`：
+Request：
 
 ```c
 Packet::possible_ctor_or_dtor_0(v2, 175);
 sub_592920(v2, a1);
 ```
 
-Receiver `sub_56F790()` 最終把這個 byte 傳入 `sub_430D50()`。
+**[C]**
 
-### `sub_430D50()` 精確 bit layout
+### 9.1 建包前的 packed flag 來源
+
+`sub_430AF0()` 建立送出的 byte：
+
+```c
+v17 = 0;
+if ( v19 != 0 )
+    v17 = *(v19 + 76) == 1;
+
+if ( v18 )
+    v17 |= 2 * v18;
+
+return sub_56F6E0(v17);
+```
+
+其中：
+
+```text
+bit 0 = GAMEROOM_ITEM state
+bit 1 = sub_728D90(current_map, ...) 的結果
+```
+
+所以 bit 1 **確實與 map-dependent / gimmick-related state 有直接 data flow**；再加上同一 Room UI 存在 `GAMEROOM_GIMMICK`，目前最適合命名為：
+
+```text
+bit1_map_gimmick_or_related_flag
+```
+
+而不是直接猜成 `crazy`、`knife`。
+
+### 9.2 ACK 的 decode
+
+`sub_430D50()`：
 
 ```c
 v16 = a2 & 1;
@@ -437,42 +518,46 @@ v17 = (a2 >> 1) & 1;
 sub_74F450(component, a2 & 1);
 sub_74F430(component, (a2 >> 1) & 1);
 ...
-GAMEROOM_ITEM + 76 = (a2 & 1) != 0;
+*(GAMEROOM_ITEM + 76) = (a2 & 1) != 0;
 ```
 
-[C] fileciteturn330file2L278-L323
-
-所以目前可以完全確定：
+因此完全可以封死：
 
 ```text
 175/176 +0x00 u8 packed_flags
 
-bit 0 = Item state
-bit 1 = another Room/gameplay component flag
-bits 2..7 = currently unresolved
+bit 0 = Item on/off
+bit 1 = map-dependent / gimmick-related flag [X high]
+bits 2..7 = unresolved
 ```
 
-**bit 0 已封死為 Item 開關。**
-
-Wiki 同樣確認 Room information 顯示 `アイテム/ノーアイテム戦`。 [W] citeturn606128search0
-
-bit 1 雖然 C 已證明會影響另一個 component，但在目前證據下不應直接命名成 `crazy`、`knife` 或 `gimmick`；先保留 `bit1_control`。
+Wiki 確認 Room information 有 `アイテム/ノーアイテム戦`，與 bit0 的 C data flow 完整對應。[W] citeturn606128search0
 
 ---
 
-## 8. `GR_AUTOCHANGE_REQ/ACK` 與其它設定：目前不與 121/173 混為一談
+## 10. `GAMEROOM_DAMAGEROOM` 是獨立 Room state，不要混入 Item packet
 
-Packet registration 還存在：
+另有：
 
 ```text
-177 GR_AUTOCHANGE_REQ
-178 GR_AUTOCHANGE_ACK
+sub_430FA0()
+    -> sub_56F950(a2)
+
+sub_430FD0()
+    -> GAMEROOM_DAMAGEROOM +76 = (a2 != 0)
 ```
 
-以及：
+也就是 `GAMEROOM_DAMAGEROOM` 有自己的控制 path。[C]
+
+因此不要因為它同樣是單 byte，就與 175/176 的 packed item byte 共用 enum。
+
+---
+
+## 11. Team balance / Team shuffle / No-skill：存在於同一 Room state machine
+
+C 的 Room UI path 同時實際使用：
 
 ```text
-GAMEROOM_DAMAGEROOM
 GAMEROOM_TEAMBALANCE
 GAMEROOM_TEAMSHUFFLE
 GAMEROOM_CLAN_NOSKILL
@@ -480,30 +565,55 @@ GAMEROOM_NORMAL_NOSKILL
 GAMEROOM_USERSLOTS
 ```
 
-目前已能直接看到的 local handlers 包括：
+Wiki 的 Room information 也明列：
 
 ```text
-sub_430FD0 -> GAMEROOM_DAMAGEROOM
-sub_433BE0 -> GAMEROOM_USERSLOTS
+チームバランス
+チームシャッフル
+NO SKILL
 ```
 
-`sub_430FD0()` 對 `GAMEROOM_DAMAGEROOM +76` 寫入 boolean：
+[W] citeturn606128search0
 
-```c
-*(v9 + 76) = a2 != 0;
+其中 no-skill 更有一個重要 client-side context split：
+
+```text
+current player/object +188 == 2
+    → GAMEROOM_CLAN_NOSKILL
+else
+    → GAMEROOM_NORMAL_NOSKILL
 ```
 
-[C] fileciteturn330file2L328-L385
+所以 no-skill **不是單一 global boolean**；至少 client UI 層有 clan / normal 兩條控制路徑。[C]
 
-這表示 `GAMEROOM_DAMAGEROOM` 是真正具體的 Room control，不只是字串資源名。
-
-`sub_433BE0()` 則透過 `GAMEROOM_USERSLOTS` 找指定 slot control 並更新其 UI state。fileciteturn330file3L485-L513
+完整 wire opcode/value mapping 仍應從相應 sender/receiver 繼續封閉，不能只憑 UI key 命名 packet。
 
 ---
 
-## 9. Mode / Rule 的 C-side 對應：不能把所有 numeric value 都當同一套 enum
+## 12. `GR_AUTOCHANGE_REQ/ACK (177/178)` 先保留為獨立 family
 
-C 中已經存在真正的 mode-specific lobby UI factory：
+Registration 明確：
+
+```text
+177 GR_AUTOCHANGE_REQ
+178 GR_AUTOCHANGE_ACK
+```
+
+目前不把它硬併入 Map/Rule/Time family，因為尚未完成其完整 handler data flow。
+
+正確做法是先保留：
+
+```text
+AUTOCHANGE = independent room-state family [OPEN]
+```
+
+等 sender → receiver → state/resource 三方閉合後再命名。
+
+---
+
+## 13. Mode code 與 Room selector value 必須嚴格分 namespace
+
+C 中存在一組真正的 mode-specific lobby UI factory：
 
 ```text
 0  CyTeamMatchModeLobbyUI
@@ -523,169 +633,171 @@ C 中已經存在真正的 mode-specific lobby UI factory：
 15 CyWeaponTestModeLobbyUI
 ```
 
-[C] `CyGameModes` factory 對 `0..13` 的 mapping 可直接由 `PaperMan.exe.c` 讀到。fileciteturn338file4L197-L333
+這與 Wiki 可見 mode 名稱可以對上大部分 public modes。[C][W] citeturn606128search0
 
-這與 Wiki 的玩家模式名稱有很好的獨立對應，例如：
-
-```text
-個人サバイバル
-爆破ミッション
-チームサバイバル
-スチールモード
-練習モード
-パルプ＆ロール
-new占領モード
-PVE
-サッカーモード
-チーム戦術モード
-チャットルーム
-```
-
-[W] citeturn606128search0
-
-但要特別注意：
+但必須禁止以下錯誤等價：
 
 ```text
-LobbyUI factory mode code
-≠
-GR_RULECHANGE 的 rule selector value
-≠
-一定等於 CGameRule object-type helper 的 numeric value
+LobbyUI mode code
+    != GR_RULECHANGE selector value
+    != GR_TIMECHANGE selector value
+    != GR_WINCHANGE / GAMEROOM_SCROLL_OBJECT value
+    != CGameRule helper 的 type predicate value
 ```
 
-目前逆向中已經同時存在數種不同 namespace / enum-like number。Server 重建時必須保持分離。
+目前 C 已經證明系統中同時存在多組 numeric namespace。
 
 ---
 
-## 10. 目前已收斂的 Room 設定資料模型
+## 14. Room selector packet summary
 
-```text
-                  ┌──────────────────────────┐
-                  │  Room UI / Resource      │
-                  │                          │
-                  │ GAMEROOM_SCROLL_MAP      │
-                  │ GAMEROOM_SCROLL_RULE     │
-                  │ GAMEROOM_SCROLL_TIME     │
-                  │ GAMEROOM_ITEM            │
-                  │ GAMEROOM_USERSLOTS       │
-                  │ ...                      │
-                  └────────────┬─────────────┘
-                               │
-                  selector list entries
-                  stride = 40 bytes
-                  value   = entry + 36
-                               │
-             ┌─────────────────┼─────────────────┐
-             │                 │                 │
-       current map       current rule       current time
-       object +130       selector value      object +136
-             │                 │                 │
-             │                 │                 │
-          121/122          169/170          173/174
-           u8/u8            u8/u8            u8/u8
-
-另外：
-171/172 -> u16 rule-specific value
-175/176 -> packed u8, bit0 = Item
-```
-
-這個模型目前可以把 **「UI 選項」與「wire value」** 分開，對 Server 重建非常重要：Server 不應假設所有 UI 選項都是連續 integer 或直接把 UI index 當 packet value。
+| Opcode | Packet | Payload | C-side destination | 目前語意 |
+|---:|---|---|---|---|
+| 121 | `GR_MAPCHANGE_REQ` | `u8` | Map selector | `map_value` **[C]** |
+| 122 | `GR_MAPCHANGE_ACK` | `u8` | `GAMEROOM_SCROLL_MAP` | `map_value` **[C]** |
+| 127 | `GR_READY_REQ` | none | Ready path | ready request **[C]** |
+| 129 | `GR_START_REQ` | `u8` | Start path | map-derived `start_parameter` **[C high]** |
+| 169 | `GR_RULECHANGE_REQ` | `u8` | `GAMEROOM_SCROLL_RULE` | `rule_selector_value` **[C]** |
+| 170 | `GR_RULECHANGE_ACK` | `u8` | `GAMEROOM_SCROLL_RULE` | `rule_selector_value` **[C]** |
+| 171 | `GR_WINCHANGE_REQ` | `u16` | `GAMEROOM_SCROLL_OBJECT` | `object_selector_value` **[C]** |
+| 172 | `GR_WINCHANGE_ACK` | `u16` | `GAMEROOM_SCROLL_OBJECT` | `object_selector_value` **[C]** |
+| 173 | `GR_TIMECHANGE_REQ` | `u8` | `GAMEROOM_SCROLL_TIME` | `time_selector_value` **[C]** |
+| 174 | `GR_TIMECHANGE_ACK` | `u8` | `GAMEROOM_SCROLL_TIME` | `time_selector_value` **[C]** |
+| 175 | `GR_ITEMCHANGE_REQ` | `u8` packed | `GAMEROOM_ITEM` + component state | bit0 Item; bit1 map/gimmick-related **[C/X]** |
+| 176 | `GR_ITEMCHANGE_ACK` | `u8` packed | same | same decode **[C/X]** |
+| 177 | `GR_AUTOCHANGE_REQ` | OPEN | OPEN | 尚未閉合 |
+| 178 | `GR_AUTOCHANGE_ACK` | OPEN | OPEN | 尚未閉合 |
+|
+注意：`GR_WINCHANGE_*` 名稱不能覆蓋 `sub_430720()` 已證明的 `GAMEROOM_SCROLL_OBJECT` data flow。
 
 ---
 
-## 11. 三方交叉驗證總表
+## 15. Server 重建時應使用的 domain model
 
-| 區域 | C / IDA | Wiki | Extracted resource | 目前結論 |
-|---|---|---|---|---|
-| Map selector | `GAMEROOM_SCROLL_MAP`、entry `+36`、121/122 u8 | Wiki 明確有 map selection / room info | `maplist.dat` 含實際 `.pmm` map resource path | **高可信閉合** |
-| Time selector | `GAMEROOM_SCROLL_TIME`、object `+136`、173/174 u8 | 各 mode 有多個時間選項 | UI/resource selector entry 機制與 C 同源；具體 value↔分鐘仍未完全解析 | **高可信 selector；enum OPEN** |
-| Rule selector | `GAMEROOM_SCROLL_RULE`、169/170 u8 | 各 mode 有不同 victory condition | selector list 本身由 C resource system 提供 | **高可信 selector；實際 enum OPEN** |
-| Win value | 171/172 u16 | 各 mode victory condition 型態不同 | 尚未把全部 value table 映射完成 | **格式已定；語意 OPEN** |
-| Item | 175/176 u8，bit0 直接寫 `GAMEROOM_ITEM` | Wiki 明確有 アイテム/ノーアイテム | `GAMEROOM_ITEM` 為實際 UI control | **bit0 完全閉合** |
-| Team balance | `GAMEROOM_TEAMBALANCE` | Wiki 明確列 team balance | 實際 Room control | **控制存在閉合；完整 wire enum 待追** |
-| Team shuffle | `GAMEROOM_TEAMSHUFFLE`、Start path 使用 | Wiki 明確列 team shuffle | 實際 Room control | **控制存在閉合；完整 wire enum 待追** |
-| No-skill | `GAMEROOM_CLAN_NOSKILL` / `GAMEROOM_NORMAL_NOSKILL` | Wiki 明確列 NO SKILL | 實際 Room controls | **mode/context split 已閉合** |
+不要直接把 client packet byte 映射成裸 integer field。推薦保留：
+
+```text
+RoomState
+├─ Mode
+├─ Map
+│  ├─ OptionIndex
+│  └─ OptionValue
+├─ Rule
+│  ├─ OptionIndex
+│  └─ OptionValue
+├─ Time
+│  ├─ OptionIndex
+│  ├─ OptionValue
+│  └─ Duration
+├─ ObjectSelector
+│  ├─ OptionIndex
+│  └─ OptionValue (u16)
+├─ ItemEnabled
+├─ MapGimmickOrRelatedFlag   // 若尚未完全命名，保留 raw flag
+├─ TeamBalance
+├─ TeamShuffle
+├─ NoSkillNormal
+├─ NoSkillClan
+└─ DamageRoom
+```
+
+Protocol layer 再明確建立：
+
+```text
+GR_MAPCHANGE  -> Map.OptionValue
+GR_RULECHANGE -> Rule.OptionValue
+GR_TIMECHANGE -> Time.OptionValue
+GR_WINCHANGE  -> ObjectSelector.OptionValue
+GR_ITEMCHANGE -> PackedFlags
+```
+
+這比在 Server 中直接寫：
+
+```text
+byte rule
+byte time
+ushort win
+```
+
+更容易維護，也更適合之後加入 packet oracle / compatibility test。
 
 ---
 
-## 12. 對 Server 重建最重要的實作規則
+## 16. 三方交叉驗證結論
 
-### 規則 A：傳 selector value，不要擅自傳 UI index
-
-C 清楚顯示：
+### 已高可信閉合
 
 ```text
-UI list index
-        ↕
-sub_4387B0()
-        ↕
-entry value @ +36
-        ↕
-packet field
+Map
+C: GAMEROOM_SCROLL_MAP + entry +36 + object +130 + 121/122
+W: Room information / map selection
+R: maplist.dat + actual .pmm resource paths
 ```
 
-因此 Server protocol model 應區分：
+### 已高可信但 enum 尚未完全閉合
 
 ```text
-RuleOptionIndex
-RuleOptionValue
-TimeOptionIndex
-TimeOptionValue
-MapOptionIndex
-MapOptionValue
+Time
+C: GAMEROOM_SCROLL_TIME + object +136 + 173/174
+W: mode-specific time options
+R: selector/resource system
 ```
-
-不要把它們合成一個 `int option`。
-
-### 規則 B：不要把 `u8` 自動轉成 public enum
-
-目前至少已出現：
 
 ```text
-map_value
-rule_value
- time_value
-packed item flags
+Rule
+C: GAMEROOM_SCROLL_RULE + 169/170
+W: mode-specific victory-condition options
+R: selector/resource system
 ```
 
-它們雖然都是 u8，但 namespace 完全不同。
-
-### 規則 C：不要把 171/172 的 u16 直接寫成 `kill_limit`
-
-Wiki 顯示不同 mode 的 victory condition 單位不同，而 C 尚未證明 171/172 只服務單一模式。因此暫時應保留：
+### Wire 已閉合、語意仍 OPEN
 
 ```text
-win_condition_value
+171/172
+    u16
+    ↓
+GAMEROOM_SCROLL_OBJECT
+    ↓
+object +144
 ```
-
-或更保守：
 
 ```text
-rule_specific_u16_value
+175/176
+    u8 packed
+    bit0 = Item
+    bit1 = map/gimmick-related [X high]
 ```
 
-### 規則 D：保留未知欄位，不要用 0 填滿
-
-對 Server reverse engineering 而言：
+### 尚未應寫死
 
 ```text
-已證明 -> 精確實作
-高可信推導 -> 明確命名 + 註記
-未證明 -> 保留 unknown / raw
+rule value → exact Kill/Round/Point/CC enum
+object value → exact public meaning
+173/174 value → exact minutes mapping
+175 bit1 → exact public label
+177/178 semantics
+team-balance / team-shuffle complete wire mapping
 ```
-
-比「為了讓程式先跑就硬塞 0」更能保持未來與 client compatibility oracle 的可逆性。
 
 ---
 
-## 13. 後續閉環目標
+## 17. 下一個最有價值的閉環
 
-這一份 Room-setting family 已經把主要 UI / selector / packet skeleton 收斂下來。下一輪最有價值的工作是：
+完成 Room selector family 後，優先順序：
 
-1. 把 `sub_430720()` 完整解析，封死 `171/172` 的 u16 語意。
-2. 完成 `sub_42FE50()` 全部 rule value mapping，找出 Wiki 的 `Kill/Round/CC/Point` 等選項如何映射到 C-side value。
-3. 完成 `sub_431160` / `GR_*` 對 `GAMEROOM_TEAMBALANCE`、`GAMEROOM_TEAMSHUFFLE`、`GAMEROOM_NORMAL_NOSKILL` 的 wire path。
-4. 找到 `GR_STARTTIME_REQ/ACK` 的真正 handler；registration 已確認 137/138，但目前不能因名稱就假設它是一般 GameRule switch 的一部分。
-5. 進一步把 `maplist.dat` 每個固定 record 的 field offset 完整解出來，與 `sub_4387B0()` 的 `+36` value 做 binary-level 對照。
+1. `sub_430720()` 的所有 caller + `GAMEROOM_SCROLL_OBJECT` entries，找出 171/172 的真正 public semantics。
+2. `sub_42FE50()` 的 `sub_426930()`，把 Rule selector value 映射到實際 mode/rule options。
+3. `GR_ITEMCHANGE` 的 bit1 沿 `sub_728D90()` → `GAMEROOM_GIMMICK` 繼續追，直到 public label 封死。
+4. `GR_STARTTIME_REQ/ACK` 137/138 的真正 handler layer，確認它與 173/174、GameRule start sequence 的關係。
+5. Room layer 完成後立即轉進 `CGameRule::sub_67CF90()` 的 mode dispatcher，再追 combat / spawn / death / score packet families。
 
-這五項完成後，Room → GameRule 的設定層才算真正封閉，之後再進入 combat / spawn / death / score packet family 會更可靠。
+目前最重要的原則仍是：
+
+```text
+Wiki 告訴我們「玩家看到什麼」
+IDA C 告訴我們「client 實際怎麼運作」
+Extracted 告訴我們「client 手上真正有哪些資料」
+
+三者一致 → 才提升為高可信 Server specification
+只有單一路徑 → 保留 raw / unknown
+```
