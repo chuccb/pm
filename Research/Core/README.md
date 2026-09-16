@@ -9,7 +9,7 @@
 
 ## 目前已恢復的 GameRule 協定家族
 
-日本版客戶端的封包註冊表中，可以直接看到一組連續的 `GR_*` 操作：
+日本版 2016 final 客戶端的封包註冊表中，可以直接看到一組連續的 `GR_*` 操作：
 
 | ID | 封包名稱 | 目前確認狀態 |
 |---:|---|---|
@@ -52,7 +52,7 @@ sub_555090(&dword_1321D00, v1);
 payload = 0 bytes
 ```
 
-發送前的 gameplay wrapper `sub_4320B0()` 先呼叫 `sub_432040()` 檢查目前是否允許操作；成功後才送 127。`sub_432040()` 會檢查 `sub_67D010()` 對應的 player/game state，以及 `sub_548E20(...) == 1`，若不符合會顯示資源訊息並拒絕送出。這表示 Ready 並非單純「按鍵即送封包」，client 有本地狀態門檻。
+發送前的 gameplay wrapper `sub_4320B0()` 先呼叫 `sub_432040()` 檢查目前是否允許操作；成功後才送 127。`sub_432040()` 會檢查 `sub_67D010()` 對應的 player/game state，以及 `sub_548E20(...) == 1`，若不符合會顯示訊息並拒絕送出。這表示 Ready 並非單純「按鍵即送封包」，client 有本地狀態門檻。
 
 ### 128 `GR_READY_ACK`
 
@@ -120,7 +120,7 @@ case 130:
     sub_562870(a4)
 ```
 
-`sub_562870()` 是一個大型狀態同步 handler，第一個 byte `n2` 決定是否進入主要同步流程；當 `n2 == 1` 時，它會繼續讀取多個 scalar／string／array 欄位，並更新 16 個玩家 slot 的狀態。換言之，130 是一個重要的「開始／遊戲狀態同步」入口，而不是簡單一個 success byte。
+`sub_562870()` 是大型狀態同步 handler，第一個 byte `n2` 決定是否進入主要同步流程；當 `n2 == 1` 時，它會繼續讀取多個 scalar／string／array 欄位，並更新 16 個 player slot 的狀態。換言之，130 是重要的「開始／遊戲狀態同步」入口，而不是簡單一個 success byte。
 
 在 `n2 == 1` 的分支中，handler 會讀取 player ID、字串資料與其他多個欄位，最後還讀取 16 個 DWORD 並寫入：
 
@@ -239,7 +239,7 @@ sub_555090(&dword_1321D00, v2);
 payload = 1 byte
 ```
 
-這與「指定某個 player/slot 強制移除」的命名一致，但 `n0x10` 究竟是 player ID、slot index 還是經過轉換的值，仍需從 `sub_432270` / `sub_479190` caller 與 player table data-flow 證明。
+這與「指定某個 player/slot 強制移除」的命名一致，但 `n0x10` 究竟是 player ID、slot index 還是經過 room mapping 的值，仍需從 `sub_432270` / `sub_479190` caller 與 player table data-flow 證明。
 
 ### 132 `GR_FORCEOUT_ACK`
 
@@ -251,3 +251,211 @@ case 132:
 ```
 
 `sub_56ECC0()` 很值得深入：其 payload 第一個 byte 決定是否繼續，後面有 player ID、字串與其他同步欄位，且會更新 lobby player object。這看起來不像簡單的 request result，而更像「強制移除／玩家資料同步」事件。
+
+## 6. `GR_CHANGESLOT_REQ` / `GR_CHANGESLOT_ACK`
+
+### 135 `GR_CHANGESLOT_REQ`
+
+Client sender：
+
+```c
+Packet::possible_ctor_or_dtor_0(v4, 135);
+v2 = sub_592920(v4, n254);
+sub_592920(v2, n0x10);
+sub_555090(&dword_1321D00, v4);
+```
+
+因此：
+
+```text
+135 GR_CHANGESLOT_REQ
++0x00 u8 field0
++0x01 u8 field1
+payload = 2 bytes
+```
+
+caller：
+
+```text
+CLobbyGameRoom::sub_432530(n254, n0x10)
+    -> field0/field1
+
+CLobbyTournamentGameRoom::sub_4793F0(n254, n0x10)
+    -> field0/field1
+```
+
+這表示一般遊戲房與 Tournament room 都共用同一個 135 協定入口，但兩者可能使用不同 caller 層邏輯。
+
+目前不應直接將兩個 byte 命名成 `fromSlot/toSlot`；需要再追 caller 如何取得 `n254` / `n0x10`。
+
+### 136 `GR_CHANGESLOT_ACK`
+
+Receiver：
+
+```text
+case 136:
+    sub_56EF40(a4)
+```
+
+handler 已證明是一個大型 slot/team/player 狀態更新 parser；開頭先讀一個 byte，再解析兩個 byte、DWORD、最多 16 個 slot mapping 等資料，因此很可能是換位後的整體玩家配置同步。
+
+## 7. `GR_MAPCHANGE_REQ` / `GR_MAPCHANGE_ACK`
+
+### 121 `GR_MAPCHANGE_REQ`
+
+目前找到：
+
+```c
+Packet::possible_ctor_or_dtor_0(v2, 121);
+sub_592920(v2, a1);
+sub_555090(&dword_1321D00, v2);
+```
+
+因此：
+
+```text
+121 GR_MAPCHANGE_REQ
++0x00 u8 map_change_value
+payload = 1 byte
+```
+
+caller `sub_56E480(a2)` 會先設定 lobby state `*(this + 112) = 1` 再送 121，表示 map change request 會直接推動 client room state/UI。
+
+### 122 `GR_MAPCHANGE_ACK`
+
+receiver：
+
+```c
+sub_592940(a1, &v2);
+return sub_42FC50(dword_EA10D0, v2);
+```
+
+目前只能確定 ACK body 開頭有一個 byte；其實際語意要追 `sub_42FC50()`。
+
+## 8. `GR_STARTTIME_REQ/ACK`
+
+`137/138` 已在 packet registration table 出現，但目前尚未完整追到 sender/receiver。從名稱推測它與開局倒數時間有關，但此處暫不將名稱當成語意證據。
+
+這一對值得高優先處理，因為它可能與 `CGameRule::NewGameStart`、開局倒數、`5000` 狀態值及實際 match countdown 直接連接。
+
+## 9. `CGameRule` 是核心匯流排
+
+一般遊戲封包進入 GameRule 的高階入口是：
+
+```text
+network receive
+    -> sub_407360(...)
+    -> CGameRule::sub_67CF90(...)
+    -> GameRule virtual dispatch
+    -> concrete rule handler
+```
+
+`CGameRule::sub_67CF90` 的作用是把 packet 交給目前存在的 GameRule subsystem，因此今後研究主要遊戲機制時，不應只在全域 `case opcode` 中搜尋；必須沿著 `CGameRule` virtual dispatch 進去。
+
+## 10. `CGameRule::NewGameStart` 已顯示出真正的 match 初始化層
+
+目前已知 `NewGameStart` 會重設大量 state，例如：
+
+```text
++56 = 5000
++48 = 0
++8  = 0
++12 = 0
++20 = 0
++24 = 0
+```
+
+並進一步呼叫：
+
+```text
+sub_709330
+sub_89B200
+sub_720820
+sub_67E560
+```
+
+以及 mode/map 相關初始化。
+
+若參與者數不足，還會設定：
+
+```text
++82 = 1
++81 = 1
+```
+
+這表明 `NewGameStart` 並不是單純「改一個 running flag」，而是 match 開始的集中初始化點。
+
+下一步應將這些 state 欄位逐一對應到：
+
+```text
+room state
+player count
+team state
+map state
+round state
+countdown
+win condition
+```
+
+而不是直接用猜測名稱。
+
+## 11. Ready → Start → Game → End 的目前架構
+
+目前 C 證據最合理的高階模型為：
+
+```text
+房間中的玩家
+    |
+    | 127 GR_READY_REQ
+    v
+Server / room state
+    |
+    | 128 GR_READY_ACK / player-state synchronization
+    v
+所有 client
+    |
+    | 129 GR_START_REQ + 1-byte parameter
+    v
+Server / GameRule
+    |
+    | 130 GR_START_ACK / large game-state synchronization
+    v
+Match initialization
+    |
+    | CGameRule::NewGameStart
+    v
+正式遊戲
+    |
+    +--> 135 slot change / player layout
+    +--> 131 forceout
+    +--> 121 map change
+    |
+    v
+結束／離開
+    |
+    +--> 133 GR_END_REQ
+    +--> 134 GR_END_ACK
+    +--> 123 GR_LEAVE_REQ
+    +--> 124 GR_LEAVE_ACK
+```
+
+這只是目前已被 C 結構支持的架構圖；尚未把所有 Server authoritative 邏輯補齊。
+
+## 12. 接下來主攻順序
+
+接下來不再以單一小功能為中心，而會開始地毯式恢復：
+
+```text
+1. Ready / Start 完整 state machine
+2. CGameRule::NewGameStart 全部欄位語意
+3. Map change / map loading / map state
+4. Player join / leave / slot / master / team
+5. Start countdown / round countdown
+6. Match end / win / draw / timeout
+7. 各 GameRule mode 的差異
+8. 戰鬥中的 damage / death / respawn / kill
+9. Server authoritative 判定與 client broadcast
+10. 將 Wiki + Resources + C 三方資訊逐項接合
+```
+
+每一項都會保留：原始函式位址、C evidence、資源 evidence、Wiki evidence、確定／推導／OPEN 三種層級，避免為了讓文件「看起來完整」而填入未證實的語意。
