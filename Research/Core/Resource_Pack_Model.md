@@ -278,7 +278,87 @@ Paper Puzzle / Skill
 
 **[WIKI:C]** 玩家可見分類；**[RES:C]** resource topology。
 
-## 9. 對 Server reconstruction 的直接約束
+## 9. 2016 年 Wiki 對 Equipment / Weapon state 的硬約束
+
+日本 Wiki 的「武器耐久値情報」頁最後修改於 **2016-03-19**，因此相較於大量後來整理頁，它是目前很有價值的 final-service-period 外部證據。
+
+頁面直接描述：
+
+```text
+PG/CASH 的無期限主武器、無期限副武器
+    -> 各自存在修理耐久值
+
+戰鬥使用
+    -> 耐久值下降
+
+途中退出
+    -> 額外耐久度 penalty
+```
+
+並指出耐久低於約 **19%** 後開始出現性能下降，Wiki 列出的受影響性能包括：
+
+```text
+威力
+精度
+連射速度
+```
+
+同時不同武器種類有不同基準耐久等級，例如 SG=A+、SMG=A+、AR=A、SR=B、副武器=S；個別武器仍可能有獨立例外值。citeturn310115search0
+
+這對 Server reconstruction 的直接意義是：
+
+```text
+WeaponIdentity
+WeaponOwnership / Inventory record
+Durability state
+Expiry / Rental state
+```
+
+不應被壓成單一 `EquippedWeaponId`。
+
+Wiki 的新手教學另外描述永久武器與期間武器的差異：期間武器會在期間結束後消失，但不因使用而損壞；永久武器則可能因使用而損壞、需要修理。這再次支持：
+
+```text
+Item identity
++ ownership
++ durability
++ expiry/period
+```
+
+應是不同 state 維度，而不是同一個 boolean。citeturn310115search4
+
+**[WIKI:A/B]** 2016-period weapon durability documentation；但精確 server wire fields 仍待 Client C/LST/ASM 對應。
+
+## 10. Package / acquisition 不應與 Item object 合併
+
+Wiki 的角色頁可以直接看到：角色與角色 package 是分開列示的；例如某些角色 package 同時包含：
+
+```text
+Character
+Set clothing
+Paper Puzzle
+```
+
+而角色已購買時，對應 Character Package 不能再次購買。citeturn311917search3turn311917search4
+
+因此 Server model 更適合拆成：
+
+```text
+PackageDefinition
+    -> acquisition / grant rules
+
+ItemDefinition
+    -> concrete item
+
+PlayerInventory
+    -> owned item instances / records
+```
+
+目前不能把「Shop Package」直接視為一個可裝備 Item。
+
+**[WIKI:C]** package composition / acquisition behavior；**[OPEN]** 對應到 2016 final Client packet schema 尚未完全封閉。
+
+## 11. 對 Server reconstruction 的直接約束
 
 目前較穩健的 server model 應分離：
 
@@ -289,6 +369,19 @@ Player
 ├─ EquipmentState
 └─ LoadoutState
 ```
+
+Weapon record 至少應保留語義上的獨立維度：
+
+```text
+ItemId
+Ownership
+Category
+Durability
+Expiry / Period
+EquippedState
+```
+
+但上述名稱目前部分仍屬 server-side reconstruction model，不是已證明的 wire schema。
 
 以及 Client resource resolution：
 
@@ -303,11 +396,9 @@ EquippedWeaponIdentity
     -> weapon resource domain
 ```
 
-這只是 model boundary，不代表上述 packet 已全部恢復。
-
 尤其目前 197 `GL_MYINFO_REQ` 的 response 尚未封死，因此不能把 Character / Inventory / Equipment 欄位硬塞進 197 的 schema。
 
-## 10. 目前最大的 OPEN
+## 12. 目前最大的 OPEN
 
 下一步仍然必須由 Client data-flow 逐層確認：
 
@@ -352,7 +443,7 @@ Packet field
 Server state
 ```
 
-## 11. 不應提前下的結論
+## 13. 不應提前下的結論
 
 目前證據不足以下列結論：
 
@@ -363,6 +454,8 @@ maplist.dat value = universal map_id
 811034967 = network protocol version
 197 response = complete inventory packet
 weapon directory name = exact server ItemType enum
+Wiki durability percentage = exact wire durability unit
+PackageDefinition = same entity as ItemDefinition
 ```
 
 這些全部保留 OPEN。
