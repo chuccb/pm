@@ -56,7 +56,7 @@ new占領モード        -> 300/500/700/1000
 - 時間可選 `10/15/20 分`。
 - 可搭配 `アイテム戦`、`クレイジープレイ`、`NO SKILL` 等選項。
 
-來源：[WIKI] `MAP・ルール詳細`。 citeturn761828search1
+來源：[WIKI] `MAP・ルール詳細`。
 
 ### C 已新增確認
 
@@ -81,7 +81,7 @@ Wiki 描述：
 - 時間：`10/20/30 分`。
 - 可有 `アイテム戦`、`クレイジープレイ`、`NO SKILL`、`チームバランス`、`チームシャッフル`。
 
-Wiki 也記錄 100 Kill 模式曾出現超過設定值才結束的 bug；這是歷史行為證據，但不能當成正常規則。 citeturn761828search1
+Wiki 也記錄 100 Kill 模式曾出現超過設定值才結束的 bug；這是歷史行為證據，但不能當成正常規則。
 
 ### C 已新增確認
 
@@ -107,7 +107,7 @@ Wiki 描述：
 - 時間可選：`3/4/5 分`。
 - Wiki 說明名稱曾由 `チームデスマッチ` 更名。
 
-來源：[WIKI] `MAP・ルール詳細`。 citeturn761828search1
+來源：[WIKI] `MAP・ルール詳細`。
 
 ### C 已新增確認
 
@@ -126,7 +126,7 @@ respawn gate
 
 ## 4. `爆破ミッション`
 
-Wiki 將此模式描述為攻擊／防守雙方競爭目標的爆破／防衛。 citeturn761828search1
+Wiki 將此模式描述為攻擊／防守雙方競爭目標的爆破／防衛。
 
 目前不把簡短 Wiki 描述擴充成未經證實的完整 Bomb protocol。
 
@@ -146,7 +146,7 @@ site A/B/etc.
 
 ## 5. `スチールモード`
 
-Wiki 將其列為獨立的 team mode，但目前需要結合其專屬頁面與 C GameRule handler 才能完整恢復。 citeturn761828search1
+Wiki 將其列為獨立的 team mode，但目前需要結合其專屬頁面與 C GameRule handler 才能完整恢復。
 
 ### C 已新增確認
 
@@ -175,7 +175,7 @@ Wiki 描述：
 - A、B 被占領後才可占領 C。
 - C 開放時重生點改變。
 
-這些內容屬於 Wiki 玩家規則基線；真正 timer／objective packet 仍需 C/RES 驗證。 citeturn761828search1
+這些內容屬於 Wiki 玩家規則基線；真正 timer／objective packet 仍需 C/RES 驗證。
 
 ### C 已新增確認
 
@@ -194,7 +194,7 @@ Wiki 描述：
 - 結束後固定 `0PG / 0Exp`。
 - `999 kill` 只是設定值，達成也不會使練習模式正常結束。
 
-這是一個非常適合用來確認「mode-specific branch」的模式，因為它與一般 FFA 的 player count、respawn、reward、end condition 都有明顯差異。 citeturn761828search1
+這是一個非常適合用來確認「mode-specific branch」的模式，因為它與一般 FFA 的 player count、respawn、reward、end condition 都有明顯差異。
 
 ### C 已新增確認
 
@@ -215,7 +215,7 @@ new占領モード
 
 其中 soccer 特別值得注意：同一 `CyTeamSoccerModeLobbyUI` 存在兩個不同 builder，分別建立 Time 與 Goal selector；因此不能把同一 class 裡所有 option value 視為同一設定。
 
-Wiki 對 `new占領モード` 與 `サッカーモード` 的上述玩家可見數值可獨立交叉確認。citeturn606128search0
+Wiki 對 `new占領モード` 與 `サッカーモード` 的上述玩家可見數值可獨立交叉確認。
 
 ## 9. 模式選擇與 Room state
 
@@ -264,7 +264,68 @@ Client 中存在獨立的 `CyGameModes` mapping，例如：
 
 這些是 mode factory／lobby class 的 namespace，不得與 `GR_RULECHANGE`、`GR_TIMECHANGE`、`GR_WINCHANGE` 的 selector values 直接共用。
 
-## 11. 目前最重要的下一階段
+## 11. Wiki 可觀察的 Room metadata／特殊規則
+
+2026-09-16 再次核對日本 Wiki `MAP・ルール詳細` 後，補充以下可直接觀察、但不能擴張成通用 protocol 規則的 evidence：
+
+### 11.1 Lobby Room information 依 mode 顯示不同的進度欄位
+
+Wiki 說明 Room information 會顯示：房間狀態、模式、地圖、勝利條件、制限時間、以及進行度等資訊；其中：
+
+```text
+個人サバイバル
+チームサバイバル
+スチールモード
+パルプ＆ロール
+サッカーモード
+    -> 顯示「開始後經過時間」
+
+チーム戦術モード
+爆破ミッション
+占領モード
+PVE
+    -> 顯示「目前進行 round 數」
+```
+
+另外 Wiki 明確記錄：**平局 round 不會讓這個 round 顯示值增加**；而且註記以前曾會增加，代表此行為具有歷史版本差異。
+
+這是重要的 Server/UI constraint：不能假設所有 mode 共用單一 `Progress = elapsedSeconds` 或單一 `RoundIndex`。
+
+### 11.2 Soccer 的 Knife 戰是 mode-specific feature
+
+Wiki 現行描述指出，Room information 中的「ナイフ戦」目前只有 `サッカーモード` 能啟用。
+
+因此 Server model 不應把 knife-room flag 視為所有 mode 都合法的 global option；至少要有：
+
+```text
+Mode capability / option availability
+    -> KnifeBattle allowed?
+```
+
+再由 room validation 決定能否接受設定。
+
+### 11.3 Practice mode 在 Lobby filter 中是特殊案例
+
+Wiki 的 mode filter 清單包含多個正式模式，但明確說：
+
+```text
+練習モード
+    -> 只能在 `MODE（全体）` 中參照
+```
+
+因此「所有 mode 都可被相同 lobby filter enum 直接選取」也是錯誤抽象；至少 Practice 在 UI filter 層有例外。
+
+### 11.4 Source / Historical note
+
+本節僅記錄 Wiki 可見行為，沒有把它們反推成 packet opcode。來源為：
+
+```text
+https://wikiwiki.jp/paperman/MAP%E3%83%BB%E3%83%AB%E3%83%BC%E3%83%AB%E8%A9%B3%E7%B4%B0
+```
+
+其中部分條目明確帶有歷史修正註記，因此後續仍必須用對應 Client build / Resource / 實測判定版本範圍。
+
+## 12. 目前最重要的下一階段
 
 目前 Room selector layer 已經比單純 Wiki-level 的整理完整很多；下一階段應轉到真正的 gameplay runtime：
 
