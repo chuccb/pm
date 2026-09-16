@@ -47,6 +47,8 @@ scope 1 -> candidate/count field +40 must be >= 2
 +32 == 1 -> special early return; exact lifecycle meaning remains OPEN
 ```
 
+`sub_A17340()` is not a pure query: if the preflight succeeds it sets `+28 = 1` before the request is serialized. Therefore `+28` is a request/active-lock-like state, but its exact original semantic name remains OPEN.
+
 Do not hard-code the server rule as only `players >= 3`. The Client first derives candidate/count state and then uses that derived state in the request gate.
 
 The Wiki says Team Kick and Full Kick require at least 3 participants. The Client comparison is `>= 2`, so `+36/+40` must not be mislabeled as raw total room population; its counting domain excludes at least one local/role dimension.
@@ -169,21 +171,15 @@ The exact permitted wire values beyond 0/1 remain a server-validation question; 
 u32 reason
 u32 applicant_id
 u32 target_id
-u32 field3
-u8  field4
+u32 duration
+u8  control
 ```
 
-`field3` is passed to `sub_A17130(..., a5)` and becomes the Voter countdown value. `sub_A17380(elapsed)` subtracts elapsed time and clamps to zero.
+`duration` is passed to `sub_A17130(..., duration)` and becomes the Voter countdown value. `sub_A17380(elapsed)` subtracts elapsed time and clamps to zero.
 
 `VoterMgr::sub_A19940()` then copies the remaining time into the active voting UI.
 
-`CVotingStateUI::sub_A1BF30()` uses:
-
-```c
-remaining / 0x3E8u
-```
-
-and sends the displayed result to `Vote_Digit`.
+The UI converts the remaining value with `/ 0x3E8u` before feeding the displayed value to `Vote_Digit`.
 
 Thus:
 
@@ -200,7 +196,124 @@ The Wiki states a 70-second voting limit. Consequently a server implementation c
 
 This is a Wiki + Client behavioral inference, not a directly recovered `70000` binary literal.
 
-## 7. 3000 ms is not the 70-second voting timeout
+## 7. 720 final byte gates an applicant predicate; it is not copied to StateUI +91
+
+Direct `sub_A19460()` flow:
+
+```c
+*(this - 32) = field4;
+v25 = 1;
+if ( *(this - 32) == 0 )
+{
+    v18 = *(this - 40); // applicant id
+    v25 = (*(**(this + 12) + 28))(*(this + 12), v18);
+}
+```
+
+Then:
+
+```c
+sub_A1A830(
+    StateUI,
+    reason,
+    target_display,
+    applicant_display,
+    duration,
+    applicant == local_player,
+    v25
+);
+```
+
+`sub_A1A830()` stores the final argument in `CVotingStateUI +91`.
+
+Therefore the corrected model is:
+
+```text
+720 field4 == 0
+    -> execute applicant-id eligibility/predicate virtual call
+    -> v25 = predicate result
+
+720 field4 != 0
+    -> skip predicate
+    -> v25 stays 1
+
+StateUI +91
+    -> v25 predicate result
+```
+
+This explicitly corrects the previous false mapping:
+
+```text
+OLD / WRONG: StateUI +91 <- 720 field4
+NEW / VERIFIED: 720 field4 -> predicate gate; StateUI +91 <- predicate result
+```
+
+Exact server-side meaning and allowed values of field4 remain OPEN.
+
+## 8. Applicant identity, voter eligibility, and UI state are independent
+
+`sub_A1A830()` stores:
+
+```text
++88 <- applicant == local_player
++91 <- applicant predicate result (v25)
+```
+
+Separately, `VoterMgr::sub_A19940()` updates:
+
+```text
+StateUI +92 <- sub_A1A6D0()     // local voting-able state
+StateUI +93 <- active/display-update condition
+```
+
+Therefore the Client contains distinct notions for:
+
+```text
+I am the applicant
+Applicant/target-related predicate result
+I am currently able to vote
+I have already voted
+The active voting UI is being updated
+```
+
+A server model should not compress these into one boolean.
+
+## 9. 719 concrete dispatch is now high confidence
+
+Parser:
+
+```c
+case 719:
+    sub_592940(a2, &v21);
+    (*(*this + 12))(this, v21);
+```
+
+The same `IVotingNetwork` concrete class defines:
+
+```c
+IVotingNetwork::sub_A19380(int status)
+```
+
+with:
+
+```text
+0 -> clear UI pulse/state, retain active-flow marker
+1 -> message 878, retain active-flow marker
+2 -> message 880
+3 -> message 879
+```
+
+Its one-argument shape matches the 719 virtual call and it is part of the same IVotingNetwork/VoterMgr implementation region. Therefore:
+
+```text
+719 -> sub_A19380
+```
+
+is now **high confidence** as the concrete dispatch mapping.
+
+What remains OPEN is not the target function, but the product-level enum names for `0..3` and the exact localization meaning of 878/879/880.
+
+## 10. 3000 ms is not the 70-second voting timeout
 
 The Client has separate `3000`-ms state paths, including:
 
@@ -214,51 +327,7 @@ CVotingStateUI result/phase path:
 
 These belong to local result/approval/UI phases. They must not be confused with the 720 voting-duration DWORD.
 
-## 8. Applicant, voter eligibility, and active UI are independent flags
-
-`sub_A1A830()` stores:
-
-```text
-+88 <- applicant == local_player
-+91 <- 720 final control byte
-+92 <- VotingAble() result
-+93 <- active/display-update state
-```
-
-This means at least four independent notions exist:
-
-```text
-I am the applicant
-I am eligible to vote
-I have already voted
-The active voting UI should be shown/updated
-```
-
-A server model that compresses these into `isVoter`, `isOwner`, or one boolean is structurally wrong.
-
-## 9. 719 status is structurally known but semantically open
-
-Parser:
-
-```c
-case 719:
-    sub_592940(a2, &v21);
-    (*(*this + 12))(this, v21);
-```
-
-So payload is exactly one byte.
-
-`sub_A19380(int)` has branches for values 0–3 and maps them to different local state/message paths, but the exported C does not yet prove that this function is the concrete implementation of dispatcher vtable slot `+12`.
-
-Therefore:
-
-```text
-719 status width = confirmed
-719 status enum = OPEN
-719 status human meaning = OPEN
-```
-
-## 10. 723 result byte must remain unnamed
+## 11. 723 result byte must remain unnamed
 
 Parser:
 
@@ -267,13 +336,42 @@ Parser:
 +0x01 u32 player_id
 ```
 
-`sub_A19770()` stores player identity and feeds the result byte into `sub_A17180()`.
+`sub_A19770()`:
 
-This proves the two fields are separate, but it is not sufficient to call result byte `SUCCESS`, `KICKED`, or any other final enum label.
+```text
+store player identity
+feed result byte to sub_A17180()
+```
 
-## 11. 396/397 is a separate protocol family
+`sub_A17180()` stores the result byte, clears active voting state, and for the local-target + result==1 condition starts the separate 3000ms Voter phase.
 
-The packet registration table explicitly maps:
+After that, `sub_A19770()` performs a player-side lookup; only if the lookup succeeds does it invoke `sub_A1A970()` for result presentation, followed by `sub_A18F80(..., 0)` for voting UI cleanup.
+
+This proves a result/UI transition chain, but not a direct room occupancy mutation.
+
+Therefore:
+
+```text
+723 final result -> Voter result state -> optional result UI -> cleanup
+```
+
+The result enum and final server action remain OPEN.
+
+## 12. 139 is a voting lifecycle/control packet but its exact semantic is open
+
+`VoterMgr::sub_A19A70()` builds opcode 139, sends it, then sets:
+
+```c
+byte_2317C68 = 1;
+```
+
+`sub_A17380()` checks this byte before continuing a particular result/phase countdown update.
+
+Therefore 139 belongs to the voting lifecycle/control path, but the current Client evidence is insufficient to name it as `END_VOTE`, `CANCEL_VOTE`, or another literal enum.
+
+## 13. 396/397 is a separate Master/Room protocol family
+
+The registration/dispatcher family is:
 
 ```text
 394 MASTER_ROOMINFO_REQ
@@ -284,34 +382,35 @@ The packet registration table explicitly maps:
 399 MASTER_SVRCLASS_ACK
 ```
 
-397 is dispatched outside the 718–723 voting dispatcher:
+397 is dispatched by a different handler:
 
 ```c
 case 397u:
     sub_58E410(a1, a4);
-    break;
 ```
 
-`sub_58E410()` reads one status byte and branches to message/resource paths for 0/default, 1, and 2.
+`sub_58E410()` reads exactly one status byte and branches on `0/1/2/default` to different message/resource paths.
 
-So:
+Therefore:
 
 ```text
 397 payload = u8 status
 ```
 
-396 request body has not yet been recovered from a direct serializer/caller path.
+The Client export still contains no direct serializer proof for 396, so its request body remains unknown.
 
-## 12. Current evidence graph
+There is also no evidence in the 723→`sub_A19770` chain that it constructs 396 directly.
+
+## 14. Current evidence graph
 
 ```text
 Wiki
   |
-  | mode / reason / 70 sec / min participants / target cannot vote
+  | mode / reasons / 70 sec / min participants
   v
 Client UI
   |
-  | scope, reasons, target selection
+  | scope / reason / target selection
   v
 CVoteTargetList
   |
@@ -319,7 +418,7 @@ CVoteTargetList
   v
 Voter
   |
-  | preflight gate
+  | request preflight + active-vote state
   v
 718
   |
@@ -327,27 +426,26 @@ Voter
 Server
   |
   +--> 719 status
-  +--> 720 vote session state
-              |
-              +--> timer
-              +--> local eligibility
-              +--> 721 vote
-              +<-- 722 voter result
-              +--> 723 final result
-```
+  +--> 720 reason/applicant/target/duration/control
+           |
+           +--> applicant predicate gate
+           +--> timer / UI state
+           +--> 721 vote
+           +<-- 722 voter result
+           +--> 723 final result
+                    |
+                    +--> Voter result state
+                    +--> UI result/cleanup
+                    +--> [actual kick/removal unresolved]
 
-The separate room/master path is:
-
-```text
+Separate:
 Room/Master
    |
    +--> 396 PM_KICKUSER_REQ
    +<-- 397 PM_KICKUSER_ACK
 ```
 
-There is currently no direct evidence that successful 723 automatically constructs 396. That relationship must remain OPEN until the actual call/data-flow is found.
-
-## 13. Server reconstruction implications
+## 15. Server reconstruction implications
 
 The minimum conceptual server state for Kick Vote should therefore separate:
 
@@ -380,36 +478,34 @@ Room / Master kick operation
 
 Do not collapse these into a single `Kick()` operation until the client/server call graph proves they share one protocol/state path.
 
-## 14. Remaining high-value traces
+## 16. Remaining high-value traces
 
 ```text
 A. 719
-   vtable +12
-   -> concrete implementation
-   -> localization 878/879/880
+   localization 878/879/880
+   -> exact user-visible status semantics
 
 B. 720 field4
-   -> all readers/writers
-   -> relationship with +91
-   -> target eligibility semantics
+   -> server-originating construction
+   -> all possible values
+   -> concrete virtual predicate at this+12
 
 C. 723
-   -> result byte enum
-   -> target state mutation
+   -> result enum
+   -> downstream target state mutation outside voting subsystem
    -> actual kick/forceout side effect
 
 D. 396
    -> construction caller
-   -> serializer body
-   -> whether any 723 path reaches it
+   -> request body
+   -> relationship, if any, to final vote action
 
 E. sub_67D520 / sub_67D240
-   -> player/session state model
-   -> exact candidate/voter eligibility meaning
+   -> exact player/session state comparison
+   -> candidate/voter eligibility meaning
 
 F. localization/resource store
+   -> 878 / 879 / 880
+   -> 892 / 893
    -> 0x369 / 0x36A
    -> 0x373..0x379
-   -> 0x892 / 0x893
-   -> 878 / 879 / 880
-```
