@@ -1,8 +1,9 @@
 # Damage 計算層：`sub_5E72C0()` 逆向
 
 > 研究日期：2026-09-16
+> Target：日本版 PaperMan 2016 年最終 Client／服務終了時版本
 >
-> 本文件只處理 `Y_TCP_INF_REQ (165)` 發送前的 damage value transform。`165` 的完整 receive-side 語意仍另列於 `Y_TCP_INF_Damage.md`。
+> 本文件只處理 `Y_TCP_INF_REQ (165)` 發送前的 damage value transform。`165` 的完整 polymorphic family 另見 `Y_TCP_INF_Damage.md`。
 
 ## 1. `sub_5E72C0()` 的真實角色
 
@@ -18,16 +19,18 @@ double __stdcall sub_5E72C0(int n16, int n16_1, float a3)
 sub_5E72C0(source, target, raw_value);
 ```
 
-再把結果經 multiplier 後量化成 byte 寫入 opcode `165` payload。
+再把結果經 variant multiplier 後送入 packet serializer。
 
-Evidence：`PaperMan.exe.c` 約 L154616-L154617、L154780-L154781、L154900。
+Evidence：`PaperMan.exe.c` 約 L154616-L154617、L154780-L154781、L154900；完整 Library C 可直接定位。
 
-## 2. 它不是固定倍率；會檢查 source / target 的三個 entry
+---
+
+## 2. 每個 source / target 最多掃描 3 個 modifier entries
 
 核心迴圈：
 
 ```c
-for (i = 0; i < 3; ++i)
+for ( i = 0; i < 3; ++i )
 {
     v3 = dword_F5653C[60195 * sub_67D7D0(n16) + i];
     ...
@@ -37,99 +40,63 @@ for (i = 0; i < 3; ++i)
 }
 ```
 
-即每個 actor 都有最多 3 個相關 entry；函式會以 `sub_67D7D0()` 把傳入 identifier 轉成實際 player slot，再取該 slot 的三個 `dword_F5653C` entry。
+也就是：
+
+```text
+source slot -> 3 entries
+ target slot -> 3 entries
+```
+
+`sub_67D7D0()` 負責將 packet/game identifier 映射為實際 player slot index，因此不能直接把 `n16` / `n16_1` 當成固定 SlotIndex。
 
 Evidence：`PaperMan.exe.c` 約 L222574-L222639。
 
-## 3. Entry 類型會被轉成內部 category
+---
 
-對每個 entry：
+## 3. Entry category mapping
+
+每個 entry 是 pointer-like value，以：
 
 ```c
-switch (entry - &unk_E98C4B)
-{
-    case 0:
-    case 1:
-    case 2:
-        type = 2;
-        break;
-
-    case 3:
-    case 4:
-    case 5:
-        type = 3;
-        break;
-
-    case 6:
-        type = 4;
-        break;
-
-    case 7:
-    case 8:
-        type = 6;
-        break;
-
-    case 9:
-        type = 1;
-        break;
-
-    case 10:
-    case 11:
-        type = 5;
-        break;
-
-    case 12:
-        type = 7;
-        break;
-
-    case 13:
-    case 14:
-    case 25:
-        type = 8;
-        break;
-
-    case 19:
-    case 20:
-    case 21:
-        type = 10;
-        break;
-
-    case 24:
-        type = 12;
-        break;
-
-    case 26:
-        type = 9;
-        break;
-
-    default:
-        type = -1;
-        break;
-}
+entry - &unk_E98C4B
 ```
 
-其中：
+分類：
 
 ```text
-source entry type == 8
-    → v13 = source entry
-
-target entry type == 9
-    → v12 = target entry
+0,1,2       -> category 2
+3,4,5       -> category 3
+6           -> category 4
+7,8         -> category 6
+9           -> category 1
+10,11       -> category 5
+12          -> category 7
+13,14,25    -> category 8
+19,20,21    -> category 10
+24          -> category 12
+26          -> category 9
+other       -> -1
 ```
 
-也就是本函式只會把兩類 entry 選入最後 damage transform：
+source 端：
 
 ```text
-source-side category 8 → damage increase candidate
-target-side category 9 → damage decrease candidate
+category 8 -> selected increase candidate
 ```
 
-Evidence：`PaperMan.exe.c` 約 L222577-L222642。
+target 端：
 
-## 4. 百分比加成與減成的實際公式
+```text
+category 9 -> selected decrease candidate
+```
 
-最後真正修改 `a3` 的程式是：
+Evidence：`PaperMan.exe.c` 約 L222574-L222639；完整 Library C 已再次確認 source/target 兩側都有相同 category classification。
+
+---
+
+## 4. 真正的百分比公式
+
+最後 modification：
 
 ```c
 if (v13 != 0)
@@ -153,43 +120,78 @@ if (v12 != 0)
 }
 ```
 
-因此如果：
+所以若：
 
 ```text
-increase_percent = P
-reduce_percent    = Q
+P = source increase percent
+Q = target reduction percent
+R = raw damage
 ```
 
-則實際順序為：
+則順序是：
 
 ```text
-A = raw_damage * (1 + P / 100)
-B = A * (1 - Q / 100)
+A = R * (1 + P/100)
+B = A * (1 - Q/100)
 ```
 
-注意第二步的減成是作用在「已加成後的 `a3`」，不是原始 damage。
+第二步作用於已加成後的值，而不是原始 damage。
 
 Evidence：`PaperMan.exe.c` 約 L222691-L222710。
 
-## 5. 同一 `sub_5E72C0()` 被多種 165 variant 共用
+---
 
-### Normal damage
+## 5. 這不是固定倍率，而是 data-driven modifier resolution
+
+完整資料流：
+
+```text
+source identifier
+    ↓
+sub_67D7D0()
+    ↓
+actual source slot
+    ↓
+dword_F5653C[slot][0..2]
+    ↓
+category classification
+    ↓
+category 8?
+    ↓
+sub_535020()
+    ↓
+object +548
+    ↓
+percentage increase
+```
+
+target side 同理，但 category 9 會做 reduction。
+
+因此：
+
+```text
+dword_F5653C = modifier-entry table [C]
+```
+
+而不是普通 weapon damage table。
+
+---
+
+## 6. 165 variants 共用此 transform
+
+### Normal Damage
 
 ```c
 v39 = sub_5E72C0(n16, n16a, a5);
 v40 = sub_5E72C0(n16, n16a, a6);
 ```
 
-Evidence：`PaperMan.exe.c` 約 L154616-L154617。
-
-### Mine/Bomb damage
+### Mine/Bomb Damage
 
 ```c
 v21 = sub_5E72C0(n16, n16a, a5);
 v22 = sub_5E72C0(n16, n16a, a6);
 ```
-
-Evidence：`PaperMan.exe.c` 約 L154780-L154781。
 
 ### MultiDamage
 
@@ -197,168 +199,251 @@ Evidence：`PaperMan.exe.c` 約 L154780-L154781。
 v27 = sub_5E72C0(n16, n16_1, a4);
 ```
 
-Evidence：`PaperMan.exe.c` 約 L154900。
+因此這是 **165 gameplay event family 的共同低階 damage transform**，不是某個單一 packet handler 私有公式。
 
-因此 damage modifier 並不是 Normal Damage 專屬；它是多個 `165` gameplay event variant 共用的低階 transform。
+---
 
-## 6. `165` 的 damage byte 是最後的量化結果
+## 7. **重要 serializer 修正：`sub_592B20` 是 4-byte writer**
 
-Normal Damage 後續會依 client state 使用：
-
-```text
-1.0
-2.0
-```
-
-在特定 subtype `n20 == 3` 時，還有：
-
-```text
-1.2
-```
-
-再呼叫：
+完整 C 直接給出：
 
 ```c
-sub_592B20(..., SLOBYTE(calculated_value));
+void *__thiscall sub_592B20(void *this, char a2)
+{
+    sub_592580(this, &a2, 4u);
+    return this;
+}
 ```
 
-因此完整概念鏈是：
+因此：
 
 ```text
-raw float
+sub_592B20 = serialize 4 bytes
+```
+
+即使 caller 寫：
+
+```c
+sub_592B20(packet, SLOBYTE(calculated));
+```
+
+也不能把 wire field 記成 `u8`。
+
+此 distinction 對 Damage protocol 尤其重要：
+
+```text
+source expression type
+    !=
+wire field width
+```
+
+Evidence：`PaperMan.exe.c` `sub_592B20` 約 L180559；Library 完整 C 已直接確認 implementation。
+
+---
+
+## 8. Damage 計算後還有 variant multiplier
+
+Normal Damage：
+
+```text
+一般路徑          -> 1.0
+client 狀態條件    -> 2.0
+n20 == 3 特殊路徑 -> 1.2
+```
+
+MultiDamage 與 Mine/Bomb path 至少都有：
+
+```text
+1.0 / 2.0
+```
+
+所以完整鏈條不是單純：
+
+```text
+raw -> modifier -> packet
+```
+
+而是：
+
+```text
+raw input
    ↓
 sub_5E72C0()
-   ├─ source category 8 → +percentage
-   └─ target category 9 → -percentage
+   ├─ source category 8 increase
+   └─ target category 9 reduction
    ↓
-variant / mode multiplier
+variant / client-state multiplier
    ↓
-byte quantization
+low-byte truncation at caller
    ↓
-Y_TCP_INF_REQ (165)
+sub_592B20()  // 4-byte wire serialization
+   ↓
+Y_TCP_INF_REQ 165
 ```
 
-這是目前比「packet 內有一個 damage byte」更接近真實遊戲計算的模型。
+Evidence：Normal / MultiDamage / Mine-Bomb serializers in `PaperMan.exe.c`。
 
-## 7. `dword_F5653C` 現在仍不能直接改名成某個資源 ID
+---
 
-`dword_F5653C` 的 entries 是 pointer-like values，並以：
+## 9. `n20 == 3` 的位置要特別注意
+
+Normal Damage：
 
 ```c
-entry - &unk_E98C4B
+if ( n20 == 3 )
+{
+    v27 = v39 * v34;
+    ...
+}
 ```
 
-分類，再交給：
+其 multiplier 在目前 C path 為 `1.2`；其他一般 path 在同一 client-state branch 可為 `2.0`。
 
-```c
-sub_535020(dword_EE3E98, entry)
-```
+這個 `n20` 仍是 Y_TCP_INF 的 event/damage subtype-like byte，不應直接命名為 public damage type。
 
-取得另一個 data object，最後讀：
+---
 
-```c
-*(object + 548)
-```
+## 10. Extracted / resource closure 的目前狀態
 
-這說明它確實是「data-driven modifier」結構，但目前沒有足夠證據把 category 8/9 直接命名成某個公開 `Item`、`Skill` 或 `Buff` 名稱。
-
-因此保留：
+`Extracted/0.xml` 可確認：
 
 ```text
-dword_F5653C = modifier-entry table [C: confirmed]
-category 8 / 9 = selected increase/decrease candidates [C: confirmed]
-public resource name = OPEN
+character -> Data\\character.dat
+item      -> Data\\item.dat
+map       -> Data\\map.dat
+pmClient  -> Data\\pmClient.dat
 ```
 
-## 8. 與 Extracted 資源的三方定位
+`ClientDataList.xml` 可確認：
 
-`Extracted/0.xml` 明確指出 client data package 包括：
-
-```xml
-<PackFile key="character" filename="Data\\character.dat" folderpath="character\\" />
-<PackFile key="item" filename="Data\\item.dat" folderpath="item\\" />
-<PackFile key="map" filename="Data\\map.dat" folderpath="map\\" />
-<PackFile key="pmClient" filename="Data\\pmClient.dat" folderpath="" />
+```text
+effect
+ui
 ```
 
-而 `ClientDataList.xml` 明確列有：
+另一方面，damage/effect client code 使用：
 
-```xml
-<DataList key="effect" />
-<DataList key="ui" />
+```text
+sub_5F5400()
+sub_5F5450()
+sub_5FC510()
+sub_5EF590()
+sub_5EF5B0()
+sub_5EFE00()
+sub_5F0FB0()
 ```
 
-目前可以確定「entry → data object → +548」是一條 data-driven client path，但尚未把 `&unk_E98C4B` 對應到某個 Extracted 檔案中的具體 record，因此這部分不提前聲稱三方完全閉合。
+其中：
 
-## 9. Wiki 只適合驗證『效果』，不應拿來猜 internal category
+```c
+sub_5EF590(resource) -> *resource
+sub_5EF5B0(resource) -> resource + 4
+sub_5EFE00(resource) -> resource + 64
+sub_5F0FB0(resource) -> resource + 252
+```
 
-Wiki 可以支持某些 gameplay 現象，例如 個人サバイバル 的擊殺／重生規則、チームサバイバル 的 team score 規則，以及其他 mode-specific 行為；但 Wiki 沒有列出 `dword_F5653C` category 8/9 或 `+548` 欄位。
+這已形成一條重要的 runtime resource object path，但 `&unk_E98C4B` 及 category 8/9 尚未完全對應到 Extracted 的具體 record，因此仍不能聲稱 public resource name 已閉合。
 
-因此正確的三方使用方式是：
+---
+
+## 11. Wiki 的角色
+
+Wiki 不提供：
+
+```text
+dword_F5653C
+modifier category 8/9
+object +548
+```
+
+所以 Wiki 不應被用來猜 internal modifier category。
+
+合理三方定位：
 
 ```text
 Wiki
-    → 驗證玩家可見結果
+  -> 驗證玩家可見的 damage / mode 結果
 
-IDA C
-    → 恢復真正計算公式與資料流
+IDA C / ASM
+  -> 恢復公式、field flow、state mutation
 
-Extracted RES
-    → 再去定位 category 對應的具體 record
+Extracted
+  -> 追 concrete item / effect / character record
 ```
 
-不能反過來用 Wiki 名詞硬套 C category。
+---
 
-## 10. Server RE 的實作結論
+## 12. Server reconstruction intermediate model
 
-目前不要把：
+目前 Server 尚不能只用：
 
-```text
-165 damage byte
+```csharp
+finalDamage = weapon.BaseDamage;
 ```
 
-直接當成：
-
-```text
-weapon base damage
-```
-
-比較準確的是：
+正確中間抽象應近似：
 
 ```text
 DamageInput
     ↓
-modifier resolution
-    ├─ source slot
-    ├─ target slot
-    ├─ up to 3 modifier entries per side
-    ├─ category filtering
-    └─ percentage mutation
+ResolveActorModifiers(source)
     ↓
-variant-specific multiplier
+ResolveActorModifiers(target)
     ↓
-wire quantization
+Select category 8 / 9 candidates
     ↓
-YTcpInfReq
+Apply source increase
+    ↓
+Apply target reduction
+    ↓
+Apply event / variant multiplier
+    ↓
+Quantize/truncate exactly as client
+    ↓
+Serialize using exact 4-byte writer semantics
+    ↓
+YTcpInfReq(165)
 ```
 
-這個模型之後可再接 `item.dat` / `character.dat` / `effect` / skill resource，一旦找到 `+548` 的具體 record schema，就能進一步把目前的 anonymous modifier 完整命名。
+其中 `ResolveActorModifiers` 的 public resource schema 仍 OPEN。
 
-## 11. Evidence anchors
+---
+
+## 13. Evidence / unresolved
+
+| 項目 | Evidence | 狀態 |
+|---|---|---|
+| `sub_5E72C0` 是 165 Damage/Multi/Bomb 共用 transform | C | CLOSED |
+| source 3 entries / target 3 entries | C | CLOSED |
+| category mapping | C | CLOSED |
+| category 8 = increase candidate | C | CLOSED |
+| category 9 = reduction candidate | C | CLOSED |
+| `+548 / 100.0` percentage formula | C | CLOSED |
+| reduction applies after increase | C | CLOSED |
+| `sub_592B20` = 4-byte writer | C | CLOSED |
+| low-byte truncation at caller | C | CLOSED |
+| 1.0 / 2.0 / subtype-3 1.2 multipliers | C | HIGH |
+| exact public identity of modifier categories | — | OPEN |
+| `&unk_E98C4B` -> Extracted concrete record | C + RES | OPEN |
+| final damage field public semantic | C | OPEN |
+
+---
+
+## 14. Evidence anchors
 
 ```text
-[IDA]
-PaperMan.exe.c:
-  L154616-L154617   Normal Damage → sub_5E72C0
-  L154780-L154781   Mine/Bomb Damage → sub_5E72C0
-  L154900          MultiDamage → sub_5E72C0
-  L222574-L222642   modifier entry classification
-  L222691-L222710   percentage increase/decrease
+[IDA / full Library C]
+sub_5E72C0      ~ L222570+
+modifier apply  ~ L222690+
+Normal Damage   ~ L154600+
+MultiDamage     ~ L154890+
+Mine/Bomb       ~ L154770+
+sub_592B20      ~ L180559
 
 [RES]
 Extracted/0.xml
 Extracted/ClientDataList.xml
 
-[Wiki]
-MAP・ルール詳細：個人サバイバル／チームサバイバル等公開規則
+[WIKI]
+MAP・ルール詳細：公開 gameplay / mode rules
 ```
