@@ -81,7 +81,7 @@ Wiki 描述：
 - 時間：`10/20/30 分`。
 - 可有 `アイテム戦`、`クレイジープレイ`、`NO SKILL`、`チームバランス`、`チームシャッフル`。
 
-Wiki 也記錄 100 Kill 模式曾出現超過設定值才結束的 bug；這是歷史行為證據，但不能當成正常規則。
+現行 Wiki 還記錄：若時間到時兩隊 Kill 數相同，畫面顯示 DRAW，但該模式不存在真正的平局勝績，實際會使雙方都被記為敗北；另外曾有 100 Kill 模式需到 101 Kill 才結束的通信相關 bug。這兩點都應視為歷史/異常行為，不可覆寫正常規則模型。
 
 ### C 已新增確認
 
@@ -91,8 +91,9 @@ Wiki 也記錄 100 Kill 模式曾出現超過設定值才結束的 bug；這是�
 
 - team kill 累計欄位。
 - team score 與個人 score 的區分。
-- timeout 與 DRAW／負數統計邏輯。
+- timeout、DRAW 顯示與實際 result/recording 的差異。
 - `チームバランス`、`チームシャッフル` 實際如何影響 team state。
+- 超過目標 Kill 的異常是否能在 Client state / packet trace 找到對應原因。
 
 ## 3. `チーム戦術モード`
 
@@ -126,40 +127,56 @@ respawn gate
 
 ## 4. `爆破ミッション`
 
-Wiki 將此模式描述為攻擊／防守雙方競爭目標的爆破／防衛。
+Wiki 描述：
 
-目前不把簡短 Wiki 描述擴充成未經證實的完整 Bomb protocol。
+- 攻擊方與防守方交替。
+- 攻擊方目標是放置並引爆炸彈；防守方目標是在時間內守住目標。
+- 任一方將對手全滅可取得該 round 勝利；但如果炸彈已經放置，防守方不能只靠殲滅對手直接結束，必須處理已放置炸彈。
+- Round 時間到時，無論炸彈狀態如何，防守方直接獲勝，因此該模式沒有真正的 round draw。
+- Wiki 的現行說明給出 concrete interaction times：設置約 5 秒、解除約 7 秒、設置後爆炸約 50 秒。
+- 條件可選 `3/5/7/10/12/15 Round`。
+- 時間可選 `3/4/5 分`。
+- 可搭配 `アイテム戦`、`クレイジープレイ`、`NO SKILL`、`チームバランス`、`チームシャッフル`。
+
+這些屬於玩家可見規則基線；目前仍沒有把 5/7/50 秒直接當成 server tick constant，因為仍需對應 C timer、bomb object state 與 packet。
 
 ### 待 C/RES 驗證
 
 ```text
-攻守 team
+attack/defense team assignment
 bomb carrier
-bomb planted
-plant timer
-defuse timer
-round end
-round win
-round draw
+bomb object identity
+bomb planted flag
+plant start/progress/end
+fuse timer
+explode event
+defuse start/progress/end
+round end cause
+round win state
+respawn/death handling
 site A/B/etc.
 ```
 
 ## 5. `スチールモード`
 
-Wiki 將其列為獨立的 team mode，但目前需要結合其專屬頁面與 C GameRule handler 才能完整恢復。
+Wiki 將其列為獨立的 team mode，目前規則段落中的 objective 為染料（cc）。現行數值為 `1000/2000/3000 cc`。
 
 ### C 已新增確認
 
 `CyStealModeLobbyUI` 直接建立 `1000/2000/3000 cc`。這證明該 mode 存在獨立 objective/value selector，不應與一般 Kill target 共用 global enum。
+
+Wiki 當前說明也指出該模式屬於「Cold」型規則，而非簡單的第一隊拿到某個固定 flag 即結束；具體 carrier / return / aggregation 仍應以 C runtime 為準。
 
 ### 待 C/RES 驗證
 
 ```text
 steal objective
 carrier state
+parallel carriers
 return/reset
 attack/defense transition
 round / timer
+point accumulation
 171/172 實際承載的 object selector semantics
 ```
 
@@ -168,18 +185,37 @@ round / timer
 Wiki 描述：
 
 - 攻擊方奪取對手的 `パルプ` 並帶回本隊魔法箱。
-- 防守方必須在 `1分30秒` 內阻止。
-- 成功奪取 1 個或成功守住後攻守交換。
-- 每 round 分前後半，雙方各執行一次攻擊與防守。
-- 存在 A/B/C 三個據點。
-- A、B 被占領後才可占領 C。
-- C 開放時重生點改變。
+- 防守方在 `1分30秒` 內阻止；成功奪取 1 個或成功守住後攻守交換。
+- `A/B/C` 三個據點各有 1 個パルプ。
+- 搶到パルプ後會切換成專用近戰武器且不能換武器。
+- 運送者被擊倒時パルプ會掉落，攻擊方可再拾取；防守方還可在特定條件下破壞落地的パルプ。
+- 防守成功會按時間累積 point，Wiki 記錄每 10 秒增加 1 point、最多 8 point，另外 1:30 守住後還會觸發額外 point/特殊狀態。
+- 達成一定條件後有 30 秒 `暴走モード`；此狀態會改變武器、移動、無敵與 scoring 行為，Wiki 明確說明 Kill/Death 不計入但該狀態下取得擊殺仍會即時給經驗與 PG。
+- 勝利條件包括達到設定 point，或時間結束時 points 較多。
+- `15/30/45 分` 是 lobby 的 time selector values。
 
-這些內容屬於 Wiki 玩家規則基線；真正 timer／objective packet 仍需 C/RES 驗證。
+以上是高價值 Wiki evidence，但目前不要把 `1:30`、10 秒、30 秒與各 point 數字直接硬編入 server，因為需要 C timer/objective state/packet cross-check。
 
 ### C 已新增確認
 
 `CyPulpnRollModeLobbyUI` 建立 concrete values `15/30/45`，Wiki 顯示同樣的 `15/30/45 分`。
+
+### 待 C/RES 驗證
+
+```text
+pulp object ID
+carrier/player state
+pickup/drop/destroy packet
+A/B/C objective state
+attack/defense phase
+1:30 timer
+point accrual
+rage/暴走 gauge
+暴走 30s timer
+kill/death suppression
+reward side effect
+round/match end
+```
 
 ## 7. `練習モード`
 
@@ -325,7 +361,30 @@ https://wikiwiki.jp/paperman/MAP%E3%83%BB%E3%83%AB%E3%83%BC%E3%83%AB%E8%A9%B3%E7
 
 其中部分條目明確帶有歷史修正註記，因此後續仍必須用對應 Client build / Resource / 實測判定版本範圍。
 
-## 12. 目前最重要的下一階段
+## 12. 版本差異：同名 mode 不代表固定規則 schema
+
+目前已由兩個 Wiki 時間點看到直接 evidence：
+
+```text
+2010-02-07 ver.Gp
+    チームサバイバル
+    -> 1000/2000/3000cc 染料條件
+
+2015-10-23 現行 Wiki
+    チームサバイバル
+    -> 50/100/200 Kill 條件
+```
+
+因此：
+
+```text
+ModeName
+    != immutable RuleSchema
+```
+
+Server reconstruction 必須把版本／build context 與 mode/rule 分開保存。這也解釋了為什麼 `GR_WINCHANGE (171/172)` 不應只靠 packet 名稱或 current Wiki 命名。
+
+## 13. 目前最重要的下一階段
 
 目前 Room selector layer 已經比單純 Wiki-level 的整理完整很多；下一階段應轉到真正的 gameplay runtime：
 
