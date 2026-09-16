@@ -1,428 +1,160 @@
-# Character → Inventory → Equipment → Weapon 研究
+# Character / Inventory / Equipment Research
 
-> 研究日期：2026-09-16
-> Target：日本版 PaperMan 2016 年最終 Client
->
-> 本文件開始收斂 Login/Channel 後的 Player profile、Character、Avatar、Inventory、Equipment、Loadout 與 Weapon 邊界。凡尚未由 Client serializer/parser、caller/data-flow 或 Resource loader 封死者，保持 OPEN。
+> Target: Japanese PaperMan final client (2016 service-ending version)
+> Updated: 2026-09-16
 
-## 1. 目前定位
+## Purpose
 
-現有生命週期已收斂至：
+This document is the high-level, server-reconstruction-oriented summary. Detailed C/LST evidence is kept in `Character_Inventory_Equipment_DeepEvidence.md`.
 
-```text
-GL_LOGIN 682/681
-    ↓
-Channel / Lobby
-    ↓
-GameRoom
-    ↓
-Player state
-```
-
-下一層需要回答：
-
-```text
-Player profile
-    ↓
-Character identity
-    ↓
-Owned items / inventory
-    ↓
-Equipped avatar / clothing
-    ↓
-Equipped weapon loadout
-    ↓
-Weapon runtime state
-```
-
-目前 `197 GL_MYINFO_REQ` 已由 Client serializer 證明為 0-byte request，但 response/schema 尚未封閉，因此不能直接宣稱 197 response 就是完整 inventory packet。
-
-## 2. Resource domain：Character 與 Item 是不同層
-
-`Extracted/0.xml` 定義：
-
-```text
-character -> Data\\character.dat -> character\\
-item      -> Data\\item.dat      -> item\\
-```
-
-`Extracted/character` 至少有：
-
-```text
-animations/
-models/
-textures/
-datarevision.txt
-```
-
-`Extracted/item` 至少有：
-
-```text
-avatar/
-object/
-thumb/
-weapon/
-datarevision.txt
-```
-
-因此目前最安全模型為：
-
-```text
-CharacterIdentity
-    !=
-CharacterRenderAssets
-
-ItemIdentity
-    !=
-ItemRenderAssets
-```
-
-Resource topology 是 [RES:A]；尚不能僅因 directory 名稱推導 server enum。
-
-## 3. Wiki 顯示的 Player-facing Character / Avatar 結構
-
-日本 Wiki 的角色衣裝頁以獨立欄位列示：
-
-```text
-Character
-Package
-Face / Expression
-Hairstyle
-Set Clothing
-Top
-Bottom
-Shoes
-Accessory
-```
-
-2016-06/07 的角色衣裝頁仍可看到這種結構。部分頁面還記載：
-
-```text
-同一 accessory 部位互斥裝備
-部位至少包含：口・胴・目・頭
-```
-
-例如 2016-07-01 的露西頁直接以 Character、Package、Face、Hairstyle、Set Clothing、Top、Bottom、Shoes、Accessory 分區。Accessory 又有部位限制。 [WIKI]
-
-因此 server-side Equipment model 不應只保存一個 `AvatarId`；至少需要能表達：
-
-```text
-Character
-Hairstyle
-SetClothing / Clothing
-Top
-Bottom
-Shoes
-Accessory slots
-```
-
-精確 wire representation 仍 OPEN。
-
-## 4. Package 與 owned item 必須分離
-
-2016 年角色衣裝頁可見 package 是另一種 acquisition unit。例如角色 package 可以同時描述：
-
-```text
-Character
-Set Clothing
-Paper Puzzle
-```
-
-且頁面記載角色已購買時不能再次購買相應 package。
-
-因此：
-
-```text
-PackageDefinition
-    -> grant/acquisition rules
-
-ItemDefinition
-    -> concrete character/avatar/item
-
-PlayerInventory
-    -> owned records
-```
-
-不能把 Package 直接當作一個可裝備 Item。
-
-## 5. Weapon domain
-
-`Extracted/item/weapon` 目前至少包含：
-
-```text
-models/
-sounds/
-sprites/
-textures/
-```
-
-這只是 Client asset domain 證據，不等於 server weapon schema。
-
-Wiki 玩家層又將武器拆成：
-
-```text
-Main
-Sub
-Melee
-Throwing
-```
-
-並另外存在期間武器、永久武器、活動／特殊武器等 acquisition/classification。
-
-因此 server loadout 至少需要 category-aware representation，而不是單一 `WeaponId`。
-
-## 6. Weapon ownership / durability / period
-
-日本 Wiki 的「武器耐久値情報」頁最後修改於 2016-03-19。頁面描述：
-
-```text
-永久主武器 / 永久副武器
-    -> 存在修理耐久值
-
-使用時間 / 戰鬥
-    -> 耐久下降
-
-途中退出
-    -> 額外耐久 penalty
-```
-
-並描述不同武器類型存在基準耐久等級，以及部分特殊武器存在例外。
-
-另有新手教學對比：
-
-```text
-期間武器
-    -> 到期消失
-    -> 不因使用而損壞
-
-永久武器
-    -> 不因期間消失
-    -> 使用可能降低耐久
-    -> 可修理
-```
-
-因此 reconstruction model 應把：
-
-```text
-WeaponIdentity
-Ownership
-Duration / Expiry
-Durability
-EquippedState
-```
-
-視為獨立概念。
-
-但目前仍不能把 Wiki 所述百分比直接當成 packet 中的 byte/ushort/unit；wire field 尚 OPEN。
-
-## 7. Weapon categories 與 local rules 的分離
-
-Wiki 的 local rule 顯示房間可以限制：
-
-```text
-Knife only
-Sub weapon only
-Sniper only
-```
-
-並依規則限制 Main/Sub/Melee/Throwing 的可用範圍。
-
-因此：
-
-```text
-EquipmentState
-    ↓
-Loadout
-    ↓
-Mode / LocalRule validation
-```
-
-比「裝備成功即等於任何模式都可使用」更符合目前可見的 client/gameplay model。
-
-但這裡仍要由 C 中 mode validation 與 weapon-state checks 進一步封閉。
-
-## 8. 初步 Server object model
+## Closed / high-confidence structure
 
 ```text
 PlayerProfile
-├─ PlayerId
-├─ Level
-├─ Currency / PG state
-├─ Experience
-├─ CharacterState
-├─ InventoryState
-└─ EquipmentState
-
-CharacterState
-├─ CharacterId
-├─ HairstyleId
-├─ SetClothingId
-├─ TopId
-├─ BottomId
-├─ ShoesId
-└─ AccessoryBySlot
-
-InventoryState
-├─ OwnedCharacterRecords
-├─ OwnedItemRecords
-├─ OwnedWeaponRecords
-└─ PackageGrantHistory / acquisition state
-
-EquipmentState
-├─ ActiveCharacterId
-├─ AvatarEquipment
-└─ WeaponLoadout
-
-WeaponRecord
-├─ ItemId
-├─ Category
-├─ Ownership
-├─ Duration / Expiry
-├─ Durability
-└─ EquippedState
+├─ Character / Appearance
+│    └─ CompositeAppearanceState (up to 20 records)
+├─ ItemCollection (up to 5120 × 28-byte records)
+├─ WeaponLoadout
+│    ├─ Primary
+│    ├─ Secondary
+│    ├─ Melee
+│    └─ Throw
+├─ SwitchWeaponSlot (separate state)
+└─ tItemSlotToClient (9 mappings)
 ```
 
-上述是 reconstruction domain model，不是 Client wire schema。
+## Character / appearance
 
-## 9. 197 `GL_MYINFO_REQ`：下一個 C-level 核心節點
+The Client maintains up to 20 composite records, each 13 words / 26 bytes. The records are parsed/serialized by the `sub_524010` / `sub_5241C0` family and compared field-by-field by `sub_525450`.
 
-目前已證明：
+The five component fields `+159..+163` are generated from a base resource identity by `sub_522580()` according to mask bits `1/2/4/8/16`. This is direct Client evidence that the fields form a derived resource composition rather than unrelated integer properties.
+
+The numeric resource namespaces are structured: the Client uses a base `19900000`-series and derived `10000000`-series identities, with explicit namespace decoding helpers. The composite state also reaches an AVATA presentation/resource path.
+
+Public labels such as body/hair/face/set/accessory are still kept OPEN at individual wire-field level. The extracted avatar resource schemas support those concepts, but resource topology alone is insufficient to assign each one to a specific wire word.
+
+## Items
+
+The Client allocates a maximum of 5120 item records, each 7 DWORD / 28 bytes. The collection supports lookup, update, removal and compaction, so it is runtime-owned state rather than a UI-only cache.
+
+The item parser also updates a separate resource-runtime state via `sub_534450(resource identity, int16 value)`.
+
+### Durability breakthrough
+
+The Client contains a direct current-versus-base percentage calculation:
 
 ```text
-197 GL_MYINFO_REQ
-payload = 0 bytes
+current = sub_534A70(resourceId)
+base    = sub_534B60(resourceManager, resourceId)
+percent = current / base × 100
 ```
 
-真正需要封閉的是：
+`sub_534A70()` retrieves the current runtime value for resource types 21/22; `sub_534B60()` retrieves resource definition field `+1204` as the base. `sub_534450()` writes the item-associated value into the runtime durability state table.
+
+Therefore the current best model is:
 
 ```text
-197
- ↓
-server response
- ↓
-receiver
- ↓
-PlayerProfile writes
- ↓
-CharacterState writes
- ↓
-Inventory records
- ↓
-Equipment / Loadout
- ↓
-Weapon state
+OwnedItem
+├─ ItemIdentity
+├─ Item-associated persistent values
+└─ DurabilityRuntime
+     ├─ CurrentDurability
+     └─ BaseDurability
 ```
 
-應逐一記錄：
+This aligns with the 2016 Japanese Wiki's permanent main/sub weapon repair-durability rules, but the exact canonical packet field and all durability mutation packets are still OPEN.
+
+## Weapons
+
+The four persisted/selectable loadout slots are directly closed by Client UI literals and state offsets:
 
 ```text
-packet field offset
-read width
-destination object / global
-loop count
-string length/data
-conditional branches
-resource lookup
-UI update
-follow-up request/response
++144206 → PRIMARYSLOT
++144208 → SECONDARYSLOT
++144210 → MELEESLOT
++144212 → THROWSLOT
 ```
 
-只有這樣才有資格把 response 命名成 `MYINFO_ACK` 或拆成多個實際 server messages。
+The Japanese Wiki independently presents the corresponding player-facing Main/Sub/Melee/Throwing weapon categories. Keep Client names and Wiki terminology side-by-side rather than silently replacing one with the other.
 
-## 10. 目前 Unresolved
+`SWITCHWEAPONSLOT` maps to `+144338` and is a separate selected/active state, not a fifth persisted equipment slot. Exact gameplay semantics remain OPEN.
+
+### Weapon wire structure
+
+`sub_524880()` / `sub_524A50()` show a conditional per-slot record:
 
 ```text
-[OPEN] 197 response opcode
-[OPEN] 197 response complete schema
-[OPEN] PlayerProfile wire fields
-[OPEN] CharacterId wire field
-[OPEN] Inventory record layout
-[OPEN] Equipment record layout
-[OPEN] Weapon item identity mapping
-[OPEN] Durability wire unit
-[OPEN] Duration/expiry wire representation
-[OPEN] Accessory slot encoding
-[OPEN] Package grant record encoding
-[OPEN] Character resource ID ↔ server CharacterId conversion
-[OPEN] Item resource ID ↔ inventory ItemId conversion
+u8 type
+u16 component0
+if type != 3:
+    u16 component1
+    u16 component2
+    u16 component3
+if component0 != 0:
+    8 trailing serializer units
 ```
 
-## 11. 下一輪優先追查
+Thus the wire record is not fixed-size for every type. Do not hardcode one payload length before tracing the underlying serializer primitives.
 
-P0：
+### 220/221
+
+`GI_CHANGEWP_REQ/ACK` supports both:
 
 ```text
-197 receive-side response
+variable-length delta → changed slots only
+full snapshot           → count = 4
 ```
 
-P0：
+The Client compares all four weapon blocks, serializes changed blocks for delta updates, and can serialize all four for a full snapshot. On receive, it parses a variable count and applies the result into the four-slot loadout state.
+
+## Character creation
+
+`GM_CREATECHAR_REQ = 214` has a 6-byte payload:
 
 ```text
-Client MyCharacter / Present UI
-    -> item lookup
-    -> equipment selection
-    -> actual send packet
+u8
+u16
+u8
+u16
 ```
 
-P0：
+The character-selection flow computes two of the values from the currently selected character/resource pointer using explicit resource-derived lookup functions. Therefore the packet must not be guessed as a generic `characterId/gender/name/slot` tuple. Exact public semantics remain OPEN.
+
+`GM_CREATECHAR_ACK = 215` currently parses one byte and feeds it into the character-selection state machine. Exact result semantics remain OPEN.
+
+## 197–200 bootstrap
 
 ```text
-weapon runtime object
-    -> item identity
-    -> durability / period
-    -> weapon slot
-    -> combat runtime
+197 GL_MYINFO_REQ   → 0-byte request
+198 GL_MYINFO_ACK   → complex CClientData/profile sync
+199 GL_MYITEM_REQ   → 0-byte request
+200 GL_MYITEM_ACK   → item collection synchronization
 ```
 
-P1：
+198 is not merely a success byte: the Client constructs a temporary `CClientData`, parses multiple profile/appearance/equipment structures, and applies the result. 200 populates the 5120-capacity item collection.
+
+## Package vs Item
+
+Historical Wiki research supports separating package grants from individual item instances. Character Packages can bundle Character + Set Avatar + Paper Puzzle; general packages can combine weapons/titles/avatar. Do not model a package as simply another inventory item.
+
+## Resource topology
+
+The repository's extracted resources include:
 
 ```text
-character loader
-item loader
-weapon loader
-UI resource lookup
+Extracted/character/
+Extracted/item/avatar/
+Extracted/item/object/
+Extracted/item/thumb/
+Extracted/item/weapon/
 ```
 
-P1：
+The Client also explicitly loads item/avatar resources. Resource identity, render asset identity, and owned item identity must remain distinct domain concepts until an explicit mapping closes them.
 
-```text
-Package
-    -> grants
-    -> inventory ownership
-    -> equipment availability
-```
+Current item data revision in the repository is `811034967`.
 
-## 12. Evidence policy
+## Evidence / uncertainty policy
 
-```text
-[RES:A]
-Extracted pack mapping / directory topology
+Closed facts should be based on direct Client/resource proof wherever possible. Wiki is historical corroboration and can establish player-visible rules, but it cannot override direct packet/data-flow evidence. Hex-Rays names are not treated as authoritative. Public semantic names remain OPEN when the actual field/resource mapping is not closed.
 
-[WIKI]
-Player-facing character / equipment / weapon behavior
-
-[C]
-197 sender與既有 Client data-flow
-
-[OPEN]
-尚未封死的 protocol / runtime semantics
-```
-
-Wiki 可以約束 Player-facing behavior，但不能直接替代 Client parser。
-Resource directory 可以證明 domain topology，但不能直接替代 ItemId / CharacterId schema。
-
-最終仍必須完成：
-
-```text
-Wiki
- ↕
-Resource
- ↕
-Client C/LST/ASM
- ↕
-Runtime object
- ↕
-Packet
- ↕
-Server state
-```
+See `Character_Inventory_Equipment_DeepEvidence.md` for the detailed evidence chain, function references, corrections, and unresolved P0 questions.
