@@ -1,12 +1,12 @@
-# PaperMan Kick / PM_KICKUSER — Master/Room Protocol Separation
+# PaperMan 踢人／PM_KICKUSER——Master／房間協定分離研究
 
-> Research snapshot: **2026-09-16**
+> 研究快照：**2026-09-16**
 >
-> This document records an important architectural distinction discovered while tracing the packet table: `PM_KICKUSER_REQ/ACK` (396/397) is a separate master/room protocol and must not be merged with the in-game voting lifecycle packets 718–723.
+> 本文件記錄沿著封包註冊表追查後確認的重要架構差異：`PM_KICKUSER_REQ/ACK`（396/397）屬於獨立的 Master／房間管理協定，不能與遊戲內投票生命週期的 718–723 混為同一套協定。
 
-## 1. Packet registration
+## 1. 封包註冊
 
-The client packet-registration table explicitly contains:
+客戶端封包註冊表明確包含：
 
 ```text
 394 MASTER_ROOMINFO_REQ
@@ -17,11 +17,11 @@ The client packet-registration table explicitly contains:
 399 MASTER_SVRCLASS_ACK
 ```
 
-So 396/397 sit in the `MASTER_*` protocol family, adjacent to room/master-management operations.
+因此 396/397 位於 `MASTER_*` 協定家族中，與房間／Master 管理操作相鄰。
 
-## 2. 397 is actually dispatched by the master/room packet handler
+## 2. 397 確實由 Master／房間封包處理器分派
 
-The generic master-side receive dispatcher contains:
+通用的 Master 側接收分派器包含：
 
 ```c
 switch (sub_591EE0(a4))
@@ -39,11 +39,11 @@ switch (sub_591EE0(a4))
 }
 ```
 
-Therefore `397` is not handled by `IVotingNetwork::sub_9BF430`; it has its own master/room handler `sub_58E410`.
+因此 `397` 並不是由 `IVotingNetwork::sub_9BF430` 處理，而是有自己獨立的 Master／房間 handler：`sub_58E410`。
 
-## 3. 397 body is proven to begin with one byte
+## 3. 397 的封包本體已證明以 1 byte 開始
 
-`sub_58E410` performs:
+`sub_58E410` 直接執行：
 
 ```c
 char status;
@@ -51,7 +51,7 @@ sub_592940(packet, &status);
 sub_58AF90(this);
 ```
 
-The handler then switches on that one-byte value:
+接著依這個 1-byte 值分支：
 
 ```c
 case 0:
@@ -73,41 +73,41 @@ default:
     break;
 ```
 
-Thus the currently proven wire shape is:
+因此目前已證明的 wire 形狀為：
 
 ```text
 397 PM_KICKUSER_ACK
-    +0x00 u8 status
-    payload size observed by parser: 1 byte
+    +0x00  u8 status
+    payload size = 1 byte
 ```
 
-At least the values `0`, `1`, and `2` are handled distinctly (`0` falls through the default path), but the exact semantic names of those status values are still OPEN.
+至少 `0`、`1`、`2` 三個值具有不同的客戶端處理路徑；其中 `0` 落入 default 路徑。
 
-Do not invent names such as `SUCCESS`, `NOT_FOUND`, or `DENIED` merely from control flow.
+但是，這些值的實際協定語意仍然是 **OPEN**。不能只靠控制流程自行命名為 `SUCCESS`、`NOT_FOUND`、`DENIED` 等。
 
-## 4. 396 request sender is not present as a direct packet constructor in the current PaperMan.exe.c export
+## 4. 目前的 PaperMan.exe.c 匯出中沒有直接找到 396 request 建構器
 
-A repository-wide search of the decompiled client did **not** find a direct constructor call of the form:
+目前在反編譯 C 匯出中，沒有找到直接形式：
 
 ```c
 Packet::possible_ctor_or_dtor_0(..., 396);
 ```
 
-and the literal protocol name `PM_KICKUSER_REQ` appears only in the packet registration table.
+而字面量 `PM_KICKUSER_REQ` 只在封包註冊表出現。
 
-This means there is currently insufficient evidence to state the 396 body layout from this client export alone.
+因此目前不足以僅憑這份客戶端 C 匯出，確定 396 request 的封包本體配置。
 
-Possible architectural explanations include:
+目前合理但尚未證實的可能性包括：
 
-- the request is generated through an indirect/virtual path whose numeric packet constructor is not recovered by the current Hex-Rays export;
-- the corresponding request path lives in a separate executable/server component rather than this gameplay client;
-- the request is part of a room/master operation whose trigger code is outside the voting UI cluster.
+- request 透過目前 C 匯出未完整恢復的間接／virtual 路徑產生；
+- 對應 request 路徑位於其他 executable／server component，而不是目前的 gameplay client；
+- request 屬於房間／Master 操作，其觸發程式碼位於 voting UI cluster 之外。
 
-These are hypotheses, not established facts.
+以上全部屬於假說，不應當成已證明事實。
 
-## 5. Separation from the in-game Kick Vote protocol
+## 5. 與遊戲內 Kick Vote 協定分離
 
-The actual in-game voting lifecycle is separately dispatched by:
+真正的遊戲內投票生命週期另外由下列封包構成：
 
 ```text
 718  client -> server  start vote request
@@ -118,67 +118,75 @@ The actual in-game voting lifecycle is separately dispatched by:
 723  server -> client  end/result notification
 ```
 
-Those packets are parsed by `IVotingNetwork::sub_9BF430`, where 719/720/722/723 are explicit switch cases.
+這些封包由 `IVotingNetwork::sub_9BF430` 處理，其中 719/720/722/723 是明確的 switch case。
 
-Therefore a compatible server should model two distinct concepts:
+因此相容伺服器應將兩個概念分開建模：
 
 ```text
-GameRule Voting
+遊戲規則投票
     718–723
 
-Master/Room KickUser operation
+Master／房間踢人操作
     396–397
 ```
 
-They may participate in the same user-facing kick feature at different layers, but the client binary does not justify treating their packet bodies as one protocol.
+兩者可能在使用者可見的「踢人」功能中處於不同層級，但目前客戶端二進位碼沒有足夠證據支持把它們的封包本體合併成同一套協定。
 
-## 6. Why this distinction matters
+## 6. 為什麼這個區分很重要
 
-The Japanese Wiki describes a player-vote-based in-game kick mechanism and also distinguishes the waiting-room kick performed by the room master.
+日本 PaperMan Wiki 將遊戲內的玩家投票踢人，以及等待房間中由房主執行的踢人操作區分開來。
 
-The binary architecture is consistent with that distinction:
+目前從二進位結構觀察到的分層也與這個區分一致：
 
 ```text
-in-game voting UI / game-rule state machine
+遊戲內投票 UI／遊戲規則狀態機
         -> 718–723
 
-master / room management layer
+Master／房間管理層
         -> PM_KICKUSER_REQ/ACK 396/397
 ```
 
-The exact cross-layer handoff — for example, whether a successful vote ultimately causes a 396 request or whether the game server performs the kick directly — is not yet proven from the available client C export.
+但成功投票後究竟是：
 
-## 7. Evidence anchors
+```text
+成功投票
+    -> 396 PM_KICKUSER_REQ
+    -> 397 PM_KICKUSER_ACK
+```
 
-### Packet registration
+還是由 game server 直接完成玩家踢除，目前仍未從現有的客戶端 C 匯出中證實。
 
-`PaperMan.exe.c` around lines 675991–676018:
+## 7. 證據定位
+
+### 封包註冊
+
+`PaperMan.exe.c` 約第 675991–676018 行：
 
 ```text
 PM_KICKUSER_REQ = 396
 PM_KICKUSER_ACK = 397
 ```
 
-### Master/room dispatcher
+### Master／房間分派器
 
-`PaperMan.exe.c` around lines 177329–177349:
+`PaperMan.exe.c` 約第 177329–177349 行：
 
 ```text
 case 397u:
     sub_58E410(a1, a4);
 ```
 
-### 397 parser/handler
+### 397 解析器／處理器
 
-`PaperMan.exe.c` around lines 178307–178344:
+`PaperMan.exe.c` 約第 178307–178344 行：
 
 ```text
 sub_592940(packet, &status)
 switch(status)
 ```
 
-### Remaining gaps
+### 尚未解決
 
-- exact 396 request wire body;
-- exact 397 status enum semantics;
-- exact linkage, if any, between successful 718–723 voting and 396/397.
+- 396 request 的實際 wire body；
+- 397 status enum 的精確語意；
+- 718–723 成功投票與 396/397 之間是否存在實際的跨層串接。
