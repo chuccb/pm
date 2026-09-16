@@ -1,302 +1,323 @@
-# Character / Inventory / Equipment / Weapon — Deep Evidence
+# Character / Inventory / Equipment — Deep Evidence
 
-> 研究日期：2026-09-16
-> Target：日本版 PaperMan 日本版 2016 年結束營運時的最終 Client
+> Target: Japanese PaperMan final client (2016 service-ending version)
+> Evidence-first reconstruction. Keep Client C/LST/ASM, Extracted resources, and Wiki/history cross-validation separate.
 >
-> 本文件不是替代 `Character_Inventory_Equipment.md`，而是記錄本輪新增、可追溯到 IDA C 的細粒度證據。尚未封死的語義維持 OPEN。
+> Status updated: 2026-09-16
 
-## 1. `CClientData` 的實際分層
+## 1. Scope and evidence discipline
 
-`CClientData::possible_ctor_or_dtor()` 直接建立多層資料區，而不是單一 Inventory array：
+This document records only conclusions that are backed by explicit client data flow or by cross-source agreement. Hex-Rays function names and variable names are not treated as authoritative semantics. When a public field name is not closed, keep a neutral structural name and mark the semantic as OPEN.
+
+Evidence levels used here:
+
+- A: direct Client/resource/ASM proof
+- B: multiple Client chains agree
+- C: Wiki/player-test evidence plus indirect Client agreement
+- D: inference
+- E: unverified
+
+Historical version, region, mode, and legacy/current status must be recorded before using a finding as a reconstruction rule.
+
+## 2. CClientData major layers
+
+The constructor initializes multiple independent state domains:
 
 ```text
-20 × 13-word records
-5120 × 7-DWORD records (28 bytes / record)
-4 × 22-word blocks
-`tItemSlotToClient`
-1024 × 23-DWORD auxiliary records
+CClientData
+├─ 20 × 13-word composite records
+├─ 5120 × 7-DWORD item records (28 bytes)
+├─ 4 × 22-word weapon/loadout blocks
+└─ tItemSlotToClient
+     └─ 9 indexed mappings
 ```
 
-因此 Server reconstruction 不應把 Character / owned item / equipment loadout 壓成單一 collection。
+The 5120-item collection and four weapon blocks are distinct structures. Do not flatten them into one inventory table.
 
-證據：IDA `CClientData::possible_ctor_or_dtor` 對上述區域逐一初始化；20-record 與 5120-record 為固定容量，4-slot block 與 `tItemSlotToClient` 亦在同一 constructor 建立。
+## 3. 5120-item collection: verified wire/runtime shape
 
-## 2. Item Record Collection：5120 × 28-byte
-
-`sub_524B70(this,a2,a3)` 是大型 Item Record 解析器：
+Each item record is 7 DWORD / 28 bytes. The parser reads:
 
 ```text
-read start/count
-clamp internal count to [0,5020]
-for up to 100 entries
-    hard capacity check < 5120
-    read record field +0
-    read resource/item identity field +4
-    validate identity through resource manager
-    read additional record fields
-    optionally read another byte when a3 != 0
-    read associated 28-byte auxiliary state
++0   DWORD-like field
++4   resource/item identity-like field
++8   parsed value
++12  parsed value
++16  parsed value
++20  optional value (when caller requests it)
++24  auxiliary value
 ```
 
-每個 record 以 7 DWORD、28 bytes 為固定 stride。
+The parser also stores an auxiliary value at the separate 14-word-per-entry area beginning around `this + 431`, and updates the resource runtime state through `sub_534450(resourceManager, itemIdentity, int16Value)`. Evidence: `PaperMan.exe.c` around `sub_524B70`; the copy/parse path calls `sub_534450` after the record is materialized.
 
-後續函式又能：
+The collection supports find, update, remove and compaction. It is therefore runtime-owned player item state, not merely UI cache.
+
+### Current semantic status
+
+- `+211` (the 4-byte field at record-relative word 1): item/resource identity-like value — **A**
+- `+214` (record-relative word 4): mutable item-associated value — **A**, public semantic still OPEN
+- `+215`: optional field — **A**, exact semantic OPEN
+- separate `+431/+432` state associated with item identity — **A** as runtime resource state bridge; exact canonical field name still OPEN
+
+## 4. Major new result: durability runtime chain
+
+A previously vague auxiliary field can now be tied directly to a durability architecture.
+
+`sub_534450()` accepts `(resource identity, int16 value)` and writes that value into the matched resource runtime entry at both `+1200` and `+1202`. The same helper is called when the 5120-item records are loaded/parsed.
 
 ```text
-find by identity
-exists by identity
-update record field
-remove record
-compact records by memmove
+Owned item record
+    │
+    ├─ item/resource identity
+    └─ associated int16 value
+             │
+             ▼
+      sub_534450()
+             │
+             ▼
+Resource runtime entry
+    ├─ +1200
+    └─ +1202
 ```
 
-所以這不是 UI-only list，而是可查找、同步、修改、刪除的 runtime item collection。
+Direct code evidence is in `PaperMan.exe.c` around `sub_534450` and `sub_524B70`.
 
-證據：`sub_524B70`, `sub_526E20`, `sub_526DD0`, `sub_526E80`, `sub_528D80`。
+### 4.1 Current/base percentage calculation
 
-## 3. `GL_MYITEM_REQ/ACK` 與 Item Collection 的直接鏈
+`sub_534530(resourceManager, resourceId)` computes:
 
 ```text
-199 GL_MYITEM_REQ
-    payload = 0 bytes
-
-200 GL_MYITEM_ACK
-    status byte
-    if status != 0:
-        sub_524B70(..., a3=1)
+current = sub_534A70(resourceId)
+base    = sub_534B60(resourceManager, resourceId)
+percent = current / base * 100
 ```
 
-Lobby bootstrap state 也直接表現為：
+`sub_534A70()` searches runtime entries whose identity namespace is type `21` or `22` and returns the stored `word_EE900A[...]` value. `sub_534B60()` performs the corresponding resource-manager lookup and returns entry `+1204`.
+
+Therefore the strongest current interpretation is:
 
 ```text
-MYINFO stage
-    -> send 199
-    -> receive 200
-    -> proceed to ROOMINFO / next lobby state
+CurrentDurability ≈ runtime current state
+BaseDurability    = resource definition field +1204
+DurabilityPercent = CurrentDurability / BaseDurability × 100
 ```
 
-因此 200 是目前最直接的 Player Item bootstrap response 證據，而不是單純 ACK flag。
+Confidence:
 
-## 4. 20-record composite：不是簡單 CharacterId
+- existence of current/base percentage computation: **A**
+- association with weapon/item durability: **A/B**
+- canonical network field name: **OPEN**
 
-`sub_524010()` 解析最多 20 筆 composite records，每筆：
+Do not yet rename the raw packet field as `Durability` in a protocol schema until the exact serializer field is closed.
+
+## 5. Weapon durability is split by loadout category
+
+`sub_534660()` reads the four-slot weapon state but has explicit branches for the first two component positions:
 
 ```text
-field[157]
-field[158..169]
+four-slot block
+├─ +144206 → primary identity
+├─ +144208 → secondary identity
+├─ +144210 → melee identity
+└─ +144212 → throw identity
 ```
 
-共 12 個主要 data values 參與後續比較；`sub_525450()` 會逐 field 比對同 index record。
+For the relevant primary/secondary path, the Client resolves the resource entry and computes current-versus-base durability percentage. This is consistent with the historical Japanese Wiki description of permanent main/sub weapons having repair durability, while duration weapons use a different model.
 
-不同 accessor 又會把 field 映射到多個 Resource-ID namespace，例如：
+The exact degradation threshold is not yet closed by Client constants; Wiki evidence places the gameplay degradation onset at approximately 19%, so treat that threshold as **C**, not A.
+
+## 6. Historical Wiki cross-check: 2016 weapon durability
+
+The Japanese Wiki page `武器耐久値情報`, last modified 2016-03-19, documents the 2016-era rule that permanent PG/CASH main/sub weapons have repair durability, battle use reduces durability, mid-match exit applies a penalty, degradation begins at roughly 19%, repair restores durability to 100%, and duration weapons do not use this durability/repair system.
+
+Use this as historical external corroboration, not as a substitute for Client field recovery.
+
+## 7. Composite appearance/resource state
+
+The 20-record composite has up to 20 records, each 13 words / 26 bytes.
+
+Wire/serialization helpers:
+
+- `sub_524010()` parses the composite record collection.
+- `sub_5241C0()` serializes the collection.
+- `sub_5244E0(index)` serializes one specified record.
+- `sub_525450()` compares all 12 component words (`+158..+169`).
+
+Current safe model:
 
 ```text
-10,000,000
-10,100,000
+CompositeAppearanceState
+├─ Base resource identity (+158)
+├─ Component resource identities (+159..+163)
+├─ Additional derived/resource fields (+164..+169)
+└─ resource/runtime resolution
+```
+
+Do not assign public names such as hair/face/set/accessory to individual wire words until the Resource ↔ field mapping is closed.
+
+## 8. `sub_522580()` component regeneration — exact masks
+
+`sub_522580(mask, record)` derives five component fields from the base resource object:
+
+```c
+base = &unk_12FA660 + (baseId % 100000);
+
+if (mask & 0x01) recordField[+159] = sub_402FF0(base) + 27008;
+if (mask & 0x02) recordField[+160] = sub_4030A0(base) - 7456;
+if (mask & 0x04) recordField[+161] = sub_403150(base) + 23616;
+if (mask & 0x08) recordField[+162] = sub_403200(base) - 10848;
+if (mask & 0x10) recordField[+163] = sub_4032B0(base) - 10400000;
+```
+
+Observed callers independently target these exact record-relative fields. This proves the first five component words are not unrelated arbitrary IDs; they form a mask-driven derived resource representation.
+
+The `19900001..19900015` tables used by the helper are direct lookup tables for the base resource namespace, but the public semantic labels remain OPEN.
+
+## 9. Resource namespace encoding
+
+The Client uses systematic numeric namespaces:
+
+```text
+19900000-series → base character/resource namespace
+10000000-series → derived component/resource namespace
+```
+
+`sub_533F50(x)` returns `(x - 10000000) / 100000` and `sub_533F80(x)` returns `(x - 10000000) % 100000`.
+
+`sub_4148D0()` converts the supplied absolute identities back into local namespace numbers before passing them into the resource/rendering pipeline. This is direct evidence that the numeric IDs are structured resource identities, not ordinary small enums.
+
+## 10. AVATA / appearance bridge
+
+The client contains an explicit `AVATA` UI/resource path, while extracted resource schemas contain avatar-like components such as:
+
+```text
+avatar
+body
+hair
+face
+set
 ...
-10,900,000
-19,900,000
+
+handTexture
+head
+face
+set
+acc1..acc4
+SoundFolderName
 ```
 
-`sub_526730()` / `sub_5269F0()` 會把這些 derived identities 交給 resource manager resolve / validate。
+This provides strong cross-source support that the composite record eventually feeds avatar rendering/presentation. It does **not** by itself prove a one-to-one wire mapping between `+159..+169` and those public labels.
 
-因此目前最安全的語義是：
+## 11. Weapon loadout — four categories closed
+
+The Client literally resolves four persistent/selectable UI/state names:
 
 ```text
-Multi-component resource identity / composite appearance-like state
++144206 → PRIMARYSLOT
++144208 → SECONDARYSLOT
++144210 → MELEESLOT
++144212 → THROWSLOT
 ```
 
-而不是直接把 20 筆中的各欄命名成 Hair / Face / Top / Shoes 等。那些名稱仍需 Resource + UI + caller 完整封閉。
+This is direct A-level Client evidence. The Japanese Wiki independently uses the corresponding player-facing categories main/sub/melee/throwing, providing external corroboration.
 
-## 5. `tItemSlotToClient`
-
-`tItemSlotToClient` 是實際存在的 C++ type。
-
-其 constructor 清零 field 0..9；其兩個直接 method 表明有 9 個 addressable mapping slots：
+Keep the Client spelling and the Wiki terminology side by side in final protocol documentation:
 
 ```text
-sub_5291A0(index) -> clear mapping[index]
-sub_5291D0(index,value) -> set mapping[index]
+Client: Primary / Secondary / Melee / Throw
+Wiki:   Main / Sub / Melee / Throwing
 ```
 
-這證實 Item-slot mapping 是獨立 runtime object，而不是單純從 Item ID 即時推算。
+`Primary ≈ Main` and `Secondary ≈ Sub` is strongly supported, but the canonical server enum name should remain a project-level choice rather than being presented as a recovered wire string.
 
-## 6. Weapon loadout：四個可同步 record 的精確 UI mapping
+## 12. Weapon `SwitchWeaponSlot` is separate from the four persisted slots
 
-這是本輪最重要的閉環之一。
+`SWITCHWEAPONSLOT` maps to `+144338`.
 
-四個 serializable slot records 使用：
+It is independently compared and updated in UI/gameplay code and is not serialized as a fifth member of the four 44-byte weapon blocks. The safest model is:
 
 ```text
-record +144206
-record +144208
-record +144210
-record +144212
+WeaponLoadout
+├─ Primary
+├─ Secondary
+├─ Melee
+└─ Throw
+
+SwitchWeaponSlot
+└─ independent selected/active state
 ```
 
-在 `sub_4C7C00()` 中，這四欄分別被直接綁定到 UI slot：
+Exact gameplay semantics of `SwitchWeaponSlot` remain OPEN: it could encode an active switching state/index rather than another equipment slot. Do not model it as a fifth weapon slot.
+
+## 13. Four weapon blocks — wire record is conditional length
+
+`sub_524880()` parses one weapon record as:
 
 ```text
-+144206 -> PRIMARYSLOT
-+144208 -> SECONDARYSLOT
-+144210 -> MELEESLOT
-+144212 -> THROWSLOT
+u8 type
+u16 component0
+
+if type != 3:
+    u16 component1
+    u16 component2
+    u16 component3
+
+if component0 != 0:
+    8 additional serializer units
 ```
 
-而且每一個都會建立 3 個 selectable entries：
+`sub_524A50()` serializes the exact inverse.
 
-```text
-Primary    : value + 12,100,000 -> index 0..2
-Secondary  : value + 12,200,000 -> index 0..2
-Melee      : value + 12,300,000 -> index 0..2
-Throw      : byte_BD3580[value]  -> index 0..2
-```
+This means a reconstruction must **not** assume one fixed payload size for every weapon record. In particular, `type == 3` omits three `u16` values.
 
-這是 UI literal 與 state field 的直接 data-flow 證據，因此四個 record 的 slot-level semantic 已可達到高可信度：
+The eight trailing values are preserved as `8 × serializer units`; their exact primitive width/name should be closed by tracing `sub_592AA0` before being normalized into the server protocol schema.
 
-```text
-Primary
-Secondary
-Melee
-Throw
-```
-
-## 7. `SWITCHWEAPONSLOT` 是獨立 state，不是第五個 serialized slot
-
-同一 `sub_4C7C00()` 中：
-
-```text
-SWITCHWEAPONSLOT
-    -> state +144338
-```
-
-它只建立單一 selected entry，且同樣使用 `+12,100,000` namespace。
-
-因此應避免這個錯誤模型：
-
-```text
-4 blocks == Main/Sub/Melee/Throw/???
-```
-
-目前更符合證據的是：
-
-```text
-Four serialized loadout records
-    Primary
-    Secondary
-    Melee
-    Throw
-
-Separate local/loadout selection state
-    SwitchWeaponSlot
-```
-
-至於 SwitchWeaponSlot 究竟是 current active weapon category、primary/secondary toggle、或其它 UI selection state，仍需 caller/runtime gameplay chain 才能最後封死。
-
-## 8. `GI_CHANGEWP_REQ/ACK` 的資料形狀
+## 14. 220/221 weapon sync supports delta and full snapshot
 
 ```text
 220 GI_CHANGEWP_REQ
 221 GI_CHANGEWP_ACK
 ```
 
-`sub_573340()` 會：
+`sub_573340()` scans slots 0..3 and serializes only changed slots when generating a delta update. A separate caller writes count `4` and serializes all four slots for a full snapshot.
+
+`sub_5735F0()` reads the count, parses each record with `sub_524880()`, then applies the resulting temporary `CClientData` through `sub_523370()`.
+
+Therefore:
 
 ```text
-scan slot 0..3
-find changed slots through sub_525680()
-write changed_count
-for each changed slot
-    serialize associated composite slot data
-send
+220/221
+├─ variable-length delta (changed slots)
+└─ full snapshot (count = 4)
 ```
 
-因此 220 不是單一 WeaponId packet，而是 **variable-length delta synchronization**。
+Do not hardcode `count == 1` or `count == 4` for every message.
 
-`sub_524A50()` 負責單一 slot serializer；`sub_524880()` 負責同形狀 parser。
+## 15. Weapon resource validation
 
-`sub_5735F0()` 先讀 changed-count，再把多個 slot records 解析到 temporary `CClientData`，最後透過 `sub_523370()` 套回 global state。
+`sub_527DB0()` validates the four major weapon components through distinct resource namespaces:
 
-## 9. Slot record wire structure：目前可確認部分
+- action-related namespace
+- `+12,200,000`
+- `+12,300,000`
+- `byte_BD3580[value]`
 
-每個 slot record 都至少包含：
+Invalid component categories trigger distinct error IDs 21–24. This strongly suggests the four components have separate resource meanings; it does not yet prove the public names of all four subcomponents.
 
-```text
-u8  slot/type
-u16 primary component
-u16 component #2
-u16 component #3
-u16 component #4
-optional 8 × wider values
-```
+## 16. `tItemSlotToClient`
 
-注意：這不是最終欄位命名；某些欄位只在條件成立時出現，因此必須按 parser branch 解碼。
+`tItemSlotToClient` is a separate C++ structure containing 9 indexed values.
 
-`slot/type == 3` 時，三個額外 u16 不會依正常 branch 讀取；這是 wire-level conditional branch，不能在 Server 端做成固定 4 × u16。
+- constructor clears the mapping
+- indices are valid for `< 9`
+- parser reads exactly 9 values
+- serializer emits all 9 values
 
-## 10. Weapon-slot resource validation
+Keep this domain separate from item inventory slots and weapon loadout categories.
 
-`sub_527DB0()` 對 slot record 中 4 個 component values 分別走不同 resource namespace / validity path：
+## 17. Character creation request — stronger than a generic 4-field packet
 
-```text
-component 1 -> &stru_B8A19C.action + value
-component 2 -> value + 12,200,000
-component 3 -> value + 12,300,000
-component 4 -> byte_BD3580[value]
-```
-
-Invalid 時會產生不同 error class：
-
-```text
-21
-22
-23
-24
-```
-
-而更高階 error logger 還明確存在：
-
-```text
-E_CRI_ERR_INVALID_WEAPON_SLOT
-E_CRI_ERR_INVALID_AVATA_SLOT
-E_CRI_ERR_INVALID_ITEM_SLOT
-E_CRI_ERR_INVALID_SKILL_SLOT
-E_CRI_ERR_INVALID_VOICE_SLOT
-```
-
-因此 Item / Avatar / Weapon / Skill / Voice slot 是不同 validation domains。
-
-## 11. `220` full-sync / delta-sync 的雙重形態
-
-同一 packet 220 不只有 delta path。
-
-至少兩個 caller 會：
-
-```text
-write count = 4
-for slot 0..3
-    sub_524A50(slot)
-send opcode 220
-```
-
-因此 reconstruction protocol 必須同時允許：
-
-```text
-count = changed slots
-```
-
-與：
-
-```text
-count = 4
-full four-slot snapshot
-```
-
-不要把 220 實作成永遠四筆或永遠一筆。
-
-## 12. Character creation packet
-
-`GM_CREATECHAR_REQ = 214` 有直接 serializer：
+`214 GM_CREATECHAR_REQ` serializes exactly four fields:
 
 ```text
 u8
@@ -305,149 +326,160 @@ u8
 u16
 ```
 
-即 payload 6 bytes。
+Total payload: 6 bytes.
 
-目前沒有足夠證據把四欄直接命名為 CharacterId / Gender / Name / Slot 等；保留 OPEN。
+A caller in the character-selection flow computes several of these values directly from the currently selected character/resource pointer:
 
-`GM_CREATECHAR_ACK = 215` 的 receiver 仍需和 UI / profile state 進一步完整追蹤。
+```text
+character/resource pointer
+├─ base namespace index: pointer - &unk_12FA660
+├─ derived value: sub_4030A0(pointer) - 7456
+└─ derived value: sub_402FF0(pointer) + 27008
+```
 
-## 13. `GP_CHPLAYC_REQ/ACK` 特別注意
+The first argument is a separate state byte (`*(this + 160)` in that call path) and is currently seen as `0` in that flow.
 
-Registration 明確存在：
+This proves the request is not safely modeled as an arbitrary `characterId / gender / name / slot` tuple. The exact public semantics of all four fields remain OPEN, but two values are demonstrably resource-derived.
+
+`215 GM_CREATECHAR_ACK` currently parses one byte and feeds it into the character-selection state object. Exact result semantics are still OPEN.
+
+## 18. `GP_CHPLAYC_REQ/ACK` remain unresolved
+
+Registration is explicit:
 
 ```text
 222 GP_CHPLAYC_REQ
 223 GP_CHPLAYC_ACK
 ```
 
-但 `223` 的實際 receiver 是 `sub_556730()`，其行為只有：
+However, the current ACK parser (`sub_556730`) reads one 32-bit value and writes it to `dword_EE8D34` after a timing/state comparison. Existing xrefs are insufficient to prove that this is literally a "character change" operation.
+
+Therefore do not silently equate opcode name with server semantics. Next required work:
+
+1. find the true 222 sender and its payload;
+2. trace all `dword_EE8D34` xrefs;
+3. connect that value to character/UI/resource state;
+4. only then rename it.
+
+## 19. Cross-validation corrections made in this pass
+
+The following earlier labels are now explicitly superseded:
 
 ```text
-read one 32-bit value
-sub_92EF00(21,23, delta,0)
-store into dword_EE8D34
+Old: item + auxiliary fields = unknown metadata
+New: one associated int16 enters the resource runtime durability path
+     and is used by current/base percentage calculation.
 ```
-
-因此目前：
 
 ```text
-Packet name = GP_CHPLAYC_ACK
-Actual receiver semantics = OPEN
+Old: four weapon blocks are generic four slots
+New: Client UI/state literals directly close them as
+     Primary / Secondary / Melee / Throw.
 ```
-
-不得因名稱直接下結論說這是 Character switching success response。
-
-更需要追的是 `sub_556730` 寫入的 `dword_EE8D34` 後續所有 xref，以及真正 opcode 222 sender 的 data provenance。
-
-## 14. Resource topology cross-check
-
-GitHub `Extracted/` 對應：
 
 ```text
-Extracted/character/
-    animations/
-    models/
-    textures/
-
-Extracted/item/
-    avatar/
-    object/
-    thumb/
-    weapon/
-
-Extracted/item/weapon/
-    models/
-    sounds/
-    sprites/
-    textures/
+Old: weapon durability is mostly Wiki-derived
+New: Client directly implements current/base percentage computation
+     and resource-runtime durability state.
 ```
-
-因此 Resource 層本身再次支持：
 
 ```text
-Character render/resource domain
-!=
-Item domain
-
-Item/Avatar domain
-!=
-Item/Weapon render domain
+Old: weapon records can be treated as one fixed wire structure
+New: type == 3 conditionally omits component1..component3.
 ```
 
-這只能證明 resource topology，不能單獨證明 wire ID。
-
-## 15. 目前已封閉與仍 OPEN
-
-### High confidence / directly evidenced
+## 20. Server reconstruction model — current safest form
 
 ```text
-[C:A]
-CClientData has separate 20-record / 5120-item / 4-slot / mapping structures
-
-[C:A]
-200 response populates 5120-record item collection
-
-[C:A]
-220/221 are composite weapon-loadout synchronization
-
-[C:A]
-220 supports changed-count delta and full four-slot snapshot caller paths
-
-[C:A]
-+144206 = PRIMARYSLOT
-+144208 = SECONDARYSLOT
-+144210 = MELEESLOT
-+144212 = THROWSLOT
-
-[C:A]
-+144338 = SWITCHWEAPONSLOT separate state
-
-[C:A]
-Weapon/Avatar/Item/Skill/Voice slot validation domains are distinct
+PlayerProfile
+│
+├─ Character / Appearance
+│    ├─ CompositeAppearanceState (up to 20)
+│    │    ├─ BaseIdentity
+│    │    ├─ Component identities
+│    │    ├─ Derived resource identities
+│    │    └─ AVATA presentation bridge
+│    │
+│    └─ Character-selection/create state
+│
+├─ ItemCollection (up to 5120 × 28-byte runtime records)
+│    ├─ ItemIdentity
+│    ├─ Item-associated values
+│    └─ Durability runtime bridge (current/base)
+│
+├─ WeaponLoadout
+│    ├─ Primary
+│    ├─ Secondary
+│    ├─ Melee
+│    └─ Throw
+│
+├─ SwitchWeaponSlot
+│
+└─ tItemSlotToClient (9 mappings)
 ```
 
-### OPEN
+For an eventual C# server, use domain objects/records with neutral names until packet semantics are closed. Do not introduce fake enums simply because an offset looks enum-like.
+
+## 21. Unresolved high-priority questions
+
+### P0 — item durability
+
+- exact wire field corresponding to the current durability value
+- whether `record +214`, `record +215`, or the separate auxiliary field is the canonical persistent source
+- exact decrease event and packets
+- repair request/ack
+- zero-durability behavior
+- duration expiry versus permanent durability
+- client-side 19% degradation threshold implementation
+
+### P0 — weapon variants
+
+- the three selectable entries per Primary/Secondary/Melee category
+- exact semantics of all four core weapon component words
+- exact 8 trailing serializer fields
+- how weapon definition resource IDs map to owned item IDs
+
+### P0 — appearance
+
+- exact public names of `+159..+169`
+- mapping to `body/hair/face/set/acc1..acc4`
+- which fields are authoritative for render versus inventory ownership
+
+### P1 — character lifecycle
+
+- `214/215` exact field semantics and validation
+- `222/223` exact character-switch semantics
+- profile/item/appearance synchronization around 197–200
+
+## 22. Evidence references from the 2016 client
+
+Key recovered functions/regions:
 
 ```text
-197 response exact opcode/schema
-Character ID wire meaning
-20-record field-by-field semantic labels
-5120-item 28-byte field-by-field semantic labels
-214 field semantics
-215 parser / side effects
-222 sender and field layout
-223 true business meaning
-Durability / expiry exact wire fields
-Resource ID -> server ID conversion
-Primary/Secondary 3-entry exact variant semantics
-SwitchWeaponSlot exact gameplay semantics
+sub_522580      component-mask regeneration
+sub_524010      composite parser
+sub_5241C0      composite serializer
+sub_5244E0      single composite serializer
+sub_524880      weapon record parser
+sub_524A50      weapon record serializer
+sub_524B70      5120-item parser
+sub_525450      composite comparison
+sub_525680      weapon-block comparison
+sub_525790..    composite accessors
+sub_527DB0      weapon resource validation
+sub_5280F0      composite validation/resource build
+sub_534450      runtime item/durability state update
+sub_534530      current/base percentage calculation
+sub_534A70      runtime current-value lookup
+sub_534B60      resource base-value lookup
+sub_534660      weapon-slot durability calculation
+sub_533F50/80   namespace decoding
+sub_533FB0/FF0  resource-manager lookup helpers
+sub_572EB0      GM_CREATECHAR_REQ serializer
+sub_572F80      GM_CREATECHAR_ACK parser
+sub_556730      GP_CHPLAYC_ACK parser
 ```
 
-## 16. Next trace priority
+## 23. Research hygiene
 
-```text
-P0
-sub_556730 -> all xrefs of dword_EE8D34
-
-P0
-opcode 222 sender discovery
-
-P0
-215 parser -> character/profile runtime state
-
-P0
-sub_522580 + sub_522CE0 + sub_523370 combined component model
-
-P0
-Primary/Secondary/Melee/Throw entries -> actual weapon runtime object
-
-P1
-Extracted/item/weapon naming/IDs -> loader -> resource manager
-
-P1
-durability/period fields -> inventory record -> UI -> gameplay
-```
-
-## 17. Evidence discipline
-
-本文件只把 Client 直接可見的 data-flow 提升為高可信證據；任何 Player-facing 名稱都必須標示其來源。Wiki / Resource topology 可以支持 domain interpretation，但不能取代 packet parser。
+Keep this file synchronized with the broader `Research/Core` documents. Prefer updating an existing section when a conclusion changes rather than creating duplicate MD files. Never promote a D-level inference to a protocol fact merely because the name looks obvious.
