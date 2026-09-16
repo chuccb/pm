@@ -130,6 +130,59 @@ player stride 240780
 
 這兩組狀態必須在 Server model 分成兩個概念層。
 
+### 5.1 重要反證：`+60150` 沒有在目前完整 C export 中找到直接寫入
+
+目前對 `PaperMan.exe.c` 的全檔 exact search：
+
+```text
+60150
+```
+
+只找到 result/UI 讀取：
+
+```c
+v93 = *(v94 + 60150);
+```
+
+用於：
+
+```text
+SOLO_RESULT_R_MY_KILL
+```
+
+反過來：
+
+```text
+60151
+```
+
+除了 result/UI 讀取外，可以直接找到 gameplay death path 的寫入：
+
+```c
+*(v12 + 60151) = 1;
+```
+
+且該寫入緊鄰：
+
+```text
+health/controller +16 <= 0
+    -> sub_9BC470(...)
+    -> +60151 = 1
+    -> death UI / result state
+```
+
+因此目前更保守、也更符合 authority 分層的結論是：
+
+```text
++60151 = client-visible death/result state；Client 有直接 death-path write evidence
+
++60150 = client-visible kill/result field；目前沒有在 C export 找到同等直接 increment/write evidence
+```
+
+這表示不能僅因欄位名稱 `MY_KILL` 就推定 Client 自己計算並維護 Kill Counter。Kill counter 很可能來自另一條 event/network/result synchronization path，仍需繼續定位。
+
+這是目前 Server reconstruction 非常重要的 evidence distinction。[A]
+
 ## 6. `n2` 的下游語義目前比 opcode 名稱更值得追
 
 在 subtype 2/16 parser 後段：
@@ -218,9 +271,21 @@ EnterCriticalSection
 LeaveCriticalSection
 ```
 
-`sub_5951C0` 建立 list node，儲存的是傳入 packet buffer/length data。[A]
+`sub_5951C0` 建立一個 list node；node 內容保存傳入的 packet data/length-like value。[A]
 
-而 `sub_593510` 會在 UDP manager 關閉時清空此 queue；它不是 movement decoder，因此不能把它誤認成 8/24 parser。真正 consumer 尚需從其它 scheduling/thread/object path 繼續找。[A]
+而 `sub_593510` 在 UDP manager shutdown/cleanup 時迭代 queue、呼叫 `sub_602E30` 處理 node payload，再 `sub_595120` 清空 node list。因此 `sub_593510` 是 cleanup/state-management path，不是 8/24 movement decoder。[A]
+
+目前 exact C export 找不到對 `sub_5937D0` 的直接 callsite；它更可能是被 thread/state-machine/vtable 間接驅動。`sub_5937D0` 本身只會：
+
+```text
+state == 0 -> sub_593830(this)
+state == 4 -> check sub_5941D0()
+state == 7 -> return ready/terminal-like condition
+```
+
+其中 `sub_593830` 會定時產生 UDP opcode 1 或在 special state 產生 opcode 15，並依 state 修改自身 status byte。[A]
+
+因此 queue consumer 仍 Unresolved；下一輪應從 `sub_5933F0` / `sub_5950E0` 建構的 object、vtable、thread/state dispatch 反查，而不是假定 `sub_5937D0` 就是 consumer。
 
 ## 10. UDP receive architecture 已固定
 
@@ -240,7 +305,7 @@ CUDPManager::sub_595840
 
 各自進入獨立 handlers。[A]
 
-8/24 是唯一目前有明文 `S_MOVE_INF` 名稱的 movement pair；其它 UDP opcode 不應僅因相似 timing/state 結構被命名成 movement。
+8/24 是目前明文可確認 `S_MOVE_INF` 的 movement pair；其它 UDP opcode 不應僅因 timing/state 結構相似而命名為 movement。
 
 ## 11. UDP sender / peer endpoint
 
@@ -322,12 +387,13 @@ GameplayEventEnvelope
 ## 15. Unresolved / 下一個必追
 
 1. 找出 UDP queue 的真正 consumer，完整解析 8/24 的 `S_MOVE_INF` payload。
-2. 完成 `sub_7463E0` 全 caller/xref：確認 subtype 2/16 的不同调用情境與 `n2` values。
+2. 完成 `sub_7463E0` 全 xref / downstream：確認 subtype 2/16 的所有情境與 `n2` values。
 3. 追 `sub_61FC20 -> sub_6745C0`，將 n2/effect type 與 resource metadata 連起來。
-4. 追 `166 subtype 2/16 -> death -> kill/assist -> respawn` 完整事件鏈。
-5. 追 `165 -> 166` 是否存在固定 server validation / sequence coupling，而不是僅靠 opcode pairing 推定。
-6. 用 LST/ASM 驗證 `sub_592B20` 與所有 suspect field width，尤其 damage values。
-7. 將 Wiki 的 assist/respawn rules 與 Client `+60150/+60151`、assist strings、respawn timers 做三方對照。
+4. 追 `+60150` 的真正寫入來源；目前只有 result/UI read evidence。
+5. 追 `166 subtype 2/16 -> death -> kill/assist -> respawn` 完整事件鏈。
+6. 追 `165 -> 166` 是否存在固定 server validation / sequence coupling，而不是僅靠 opcode pairing 推定。
+7. 用 LST/ASM 驗證 `sub_592B20` 與所有 suspect field width，尤其 damage values。
+8. 將 Wiki 的 assist/respawn rules 與 Client assist strings、`+60151` death writes、respawn timers 做三方對照。
 
 ## Evidence quality
 
