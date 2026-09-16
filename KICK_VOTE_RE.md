@@ -64,11 +64,11 @@ and the corresponding load/update side uses the same logical action name:
 sub_71ADA0(this + 904, L"Kick Vote", a2);
 ```
 
-Address: approximately `0x?` in the exported C around the key-setting subsystem; source line around 30-490 in the semantic search result.
+These calls occur in the client's user-key configuration code.
 
 **Conclusion:** [X] Wiki's `P` binding is not merely documentation; the client itself exposes a `Kick Vote` action bound to `P`.
 
-C evidence: `PaperMan.exe.c`, search result containing `L"Kick Vote", L"P"`.
+C evidence: `PaperMan.exe.c`, the user-key configuration block containing `L"Kick Vote", L"P"`.
 
 ---
 
@@ -106,7 +106,7 @@ These numbers are **client protocol-registration IDs observed in the constructor
 
 This distinction matters when rebuilding a server.
 
-C evidence: `PaperMan.exe.c` around lines 675986-676009 in the extracted C representation.
+C evidence: `PaperMan.exe.c` around the packet registration block at approximately `0x00A7xxxx` / exported C lines 675986-676009. Use the literal message names as the primary locator because Hex-Rays line numbering can change between exports.
 
 ---
 
@@ -414,7 +414,7 @@ CVotingApprovalUI    -> yes/no approval input
 
 and renders the remaining vote time when the state is appropriate.
 
-One state field is initialized to `3000`, which is consistent with an internal millisecond-style timer, but **do not equate `3000` directly with the Wiki's 70-second public vote duration**. The relationship between this timer and the network-updated countdown has not yet been fully traced.
+One state field is initialized to `3000`, which is consistent with an internal millisecond-style timer, but **do not equate `3000` directly with the Wiki's 70-second public vote duration**. The relationship between this timer and the network-updated countdown has not been fully traced.
 
 ---
 
