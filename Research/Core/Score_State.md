@@ -38,8 +38,6 @@ dword_F6DCF8[60195 * i] = 0;
 dword_F6DCFC[60195 * i] = 0;
 ```
 
-這與每一場新的 player-state synchronization 需要重新建立 score state 的模型一致。
-
 Evidence：`PaperMan.exe.c` 約 L4782-L4792。
 
 ## 3. Result UI 對兩個欄位的語意已直接命名
@@ -82,7 +80,7 @@ dword_F6DCFC = Death count      [C: CLOSED]
 
 Evidence：`PaperMan.exe.c` 約 L266539-L266549、L268522-L268548、L272752-L273079、L274293-L274658。
 
-## 4. 排名規則：Kill → Death → 第三欄
+## 4. 一般 Result ranking 的 comparator 已閉合
 
 `sub_6482C0(a1, a2)`：
 
@@ -96,19 +94,35 @@ if (dword_F6DCFC[60195 * a1] == dword_F6DCFC[60195 * a2])
 return dword_F6DCFC[60195 * a1] < dword_F6DCFC[60195 * a2];
 ```
 
-因此排序鍵精確是：
+所以 **C 實際 comparator** 的排序鍵是：
 
 ```text
 1. Kill 降序
-2. Kill 相同時 Death 升序
-3. Kill / Death 都相同時 dword_F33184 升序
+2. Kill 相同 → Death 升序
+3. Kill / Death 都相同 → dword_F33184 升序
 ```
 
 Evidence：`PaperMan.exe.c` 約 L265865-L265879。
 
-## 5. High-score selector 也重複相同排序
+### `dword_F33184` 暫時不能命名
 
-`sub_759030()` 在 16 個 slot 中尋找最佳成績，核心比較順序同樣是：
+針對 `dword_F33184` 做進一步全檔搜尋後，目前 C export 能可靠定位到的使用主要是 comparator / high-score selection 中的讀取，沒有找到足夠可靠的對應寫入點。
+
+因此目前禁止把它寫成：
+
+```text
+❌ participant count
+❌ special-shot count
+❌ score
+```
+
+也不能因 Wiki 的 tournament 特別規則寫著「キル数＞デス数＞参加人数＞特殊ショット」就直接認定 `dword_F33184` 是 `参加人数`；兩者目前缺乏一條直接 data-flow 證據。
+
+這是一個刻意保留的 OPEN 欄位。
+
+## 5. High-score selector 也重複相同比較鏈
+
+`sub_759030()` 在 16 個 slot 中尋找最佳成績，實際比較流程同樣是：
 
 ```text
 higher Kill
@@ -118,15 +132,13 @@ lower Death
 lower dword_F33184
 ```
 
-並將選出的 slot 寫入自己的 state。
+Evidence：`PaperMan.exe.c` 約 L759030 起始的 `sub_759030`。
 
-這不是單一 Result UI 的偶然排序，而是 mode/runtime 共用的比較邏輯。
+這表示 Kill / Death comparator 不只是單一 Result UI 的畫面排序；同一比較鏈也用於 mode/runtime 尋找 high-score slot。
 
-Evidence：`PaperMan.exe.c` 約 L759030 起始的 `sub_759030`，其中 L188-L233 可見完整比較鏈。
+## 6. 個人サバイバル：Wiki ↔ C 的 score 模型閉環
 
-## 6. 個人サバイバル：Wiki 與 C 的 score 模型吻合
-
-Wiki `MAP・ルール詳細` 對 個人サバイバル 的描述是：
+Wiki `MAP・ルール詳細` 對 個人サバイバル 定義為：
 
 ```text
 制限時間内に一番多くの敵を倒した人が勝利するモード
@@ -139,59 +151,76 @@ Wiki `MAP・ルール詳細` 對 個人サバイバル 的描述是：
 10 / 15 / 20 分
 ```
 
-C 則直接把 `dword_F6DCF8` 顯示為 `KILL`，並以它選擇 high score；`dword_F6DCFC` 顯示為 `DEATH`。
+C 則直接以 `dword_F6DCF8` 顯示 `KILL`，並透過 high-score comparator 尋找最高 Kill；`dword_F6DCFC` 明確對應 `DEATH`。
 
-因此三方目前形成的閉環是：
+因此目前閉環：
 
 ```text
 Wiki
-  └─ 個人サバイバル的核心勝負量 = Kill
+  └─ 個人サバイバル核心勝負量 = Kill
 
-C / UI
+IDA C
   ├─ F6DCF8 = KILL
   ├─ F6DCFC = DEATH
-  └─ high-score = highest Kill, then lowest Death
-
-Result
-  └─ 可直接由兩個 player state 建立排名
+  └─ high-score = highest Kill, then lowest Death, then unresolved third key
 ```
 
-Wiki evidence：PaperMan Wiki `MAP・ルール詳細`（個人サバイバル段落）。
+Wiki evidence：PaperMan Wiki `MAP・ルール詳細` 的 個人サバイバル 段落。
 
-## 7. Team Survival 的公開規則也能對上同一 state
+## 7. Team Survival：player score 與 team aggregation 必須分層
 
-Wiki 對 チームサバイバル 描述為以隊伍累積擊殺數決定勝負，目標可選：
+Wiki 對 チームサバイバル 描述為隊伍累積擊殺數，目標可選：
 
 ```text
 50 / 100 / 200 Kill
 10 / 20 / 30 分
 ```
 
-C 的 team result UI 仍直接以每個 player 的：
+C 的 Team Result / Game End UI 仍然逐玩家讀：
 
 ```text
 F6DCF8 = Kill
 F6DCFC = Death
 ```
 
-組成 TEAM_RESULT_A / B 與 TEAM_GAMEEND 的個人成績顯示。
-
-因此目前最穩健的模型是：
+所以較安全的 server model 是：
 
 ```text
-Player score state
+PlayerScore
     ├─ Kill
     └─ Death
 
-Mode rule
-    └─ 再決定如何把 player score 聚合成 team / round / game outcome
+TeamRule
+    └─ 依 mode 規則聚合 PlayerScore
 ```
 
-不要把 `F6DCF8` 直接重命名成 `TeamKills`；它在 C 中是 per-player state，Team Survival 的 team total 應視為更高層聚合。
+不要直接把 `F6DCF8` 改名為 `TeamKills`；它在 client state 中是 per-player storage。
 
-## 8. 一個非常重要的 network 邊界
+## 8. `sub_759030()` 的另一個證據：它真的在選「最高成績玩家」
 
-目前已找到大型 server-state synchronization parser 對：
+`CyGameModes::CyIndividualSurvivalMode::sub_76FBE0()` 呼叫：
+
+```c
+if (sub_759030(this, &n0x10) != 0)
+{
+    ...
+    (*(**(this + 12) + 4))(
+        *(this + 12),
+        *(this + 8),
+        v8,
+        dword_F6DCF4[60195 * n0x10],
+        v9,
+        1);
+}
+```
+
+這條鏈把 `sub_759030()` 選出的 slot 帶入 mode UI / player-related display，與其 high-score 用途吻合。
+
+Evidence：`PaperMan.exe.c` 約 L76FBE0 起始區域；`sub_759030()` 約 L759030。
+
+## 9. Network boundary：score state 有 synchronization，但 mutation source 尚未閉合
+
+目前能看到一個大型 player-state synchronization parser 對：
 
 ```text
 F6DCF4
@@ -204,14 +233,14 @@ F6DD11
 
 進行整體寫入。
 
-但截至本輪，尚未在 `PaperMan.exe.c` 找到可靠的：
+同時，針對：
 
 ```text
 ++dword_F6DCF8[slot]
 ++dword_F6DCFC[slot]
 ```
 
-write path。
+做過直接 increment 搜尋，沒有找到可靠結果。
 
 因此目前不能寫成：
 
@@ -221,18 +250,18 @@ Y_TCP_INF_REQ (165)
     → Death++
 ```
 
-目前應保持：
+目前狀態：
 
 ```text
-Kill / Death state                    = CLOSED
-Kill / Death 是 synchronized state    = CLOSED / HIGH
-165 是 gameplay information path      = HIGH
-165 直接更新 Kill / Death             = OPEN
+Kill / Death storage                 = CLOSED
+Kill / Death 是 synchronized state  = CLOSED / HIGH
+165 是 gameplay event/info path     = HIGH
+165 直接更新 Kill / Death           = OPEN
 ```
 
-## 9. 與 165 Damage family 的關係
+## 10. 與 `Y_TCP_INF_REQ (165)` 的關係
 
-`Y_TCP_INF_REQ (165)` 被以下 send path 共用：
+165 至少由以下 send path 共用：
 
 ```text
 GameNetwork::OnSendPacketDamage
@@ -241,72 +270,104 @@ GameNetwork::OnSendPacketMineBombDamage
 GameNetwork::OnSendPacketBotSuicide
 ```
 
-而 packet payload 常帶有 actor/target slot-like 欄位，部分 variant 還會附帶：
+而多種 payload 都含 actor/target slot-like 欄位，部分 variant 還帶：
 
 ```c
 dword_F6DD1C[target]
 ```
 
-因此 165 明顯位於 gameplay event / state propagation 路徑，但目前沒有足夠證據把它直接等同於 score mutation。
+因此 165 明顯位於 gameplay network / event propagation 一側，但「event → score mutation」仍需 receive-side proof。
 
-這個邊界刻意保留，供後續找到 165/166 receive dispatcher 後再閉合。
+## 11. Extracted RES：資源樹本身已證明 client data 是分層封裝的
 
-## 10. 目前適合 Server 的資料模型
+`Extracted/0.xml` 明確把 client data 分成：
 
-建議先抽象成：
+```xml
+<PackFile key="character" filename="Data\\character.dat" folderpath="character\\" />
+<PackFile key="item" filename="Data\\item.dat" folderpath="item\\" />
+<PackFile key="map" filename="Data\\map.dat" folderpath="map\\" />
+<PackFile key="pmClient" filename="Data\\pmClient.dat" folderpath="" />
+```
+
+同時 `ClientDataList.xml` 又明確列出：
+
+```xml
+<DataList key="BulletHole" />
+<DataList key="effect" />
+<DataList key="ui" />
+<DataList key="ui_temp" />
+```
+
+這支持本研究採用的三層分工：
+
+```text
+Wiki       = public gameplay semantics
+Extracted  = concrete client resource / data identity
+IDA C/LST  = executable data-flow / protocol evidence
+```
+
+它不代表某個特定 score field 已經由 RES 單獨證明；不要過度外推。
+
+Evidence：`Extracted/0.xml`、`Extracted/ClientDataList.xml`。
+
+## 12. 三方證據矩陣
+
+| 主題 | Wiki | Extracted / RES | IDA C | 狀態 |
+|---|---|---|---|---|
+| 個人サバイバル以 Kill 決勝 | 有 | UI/resource 架構存在 | `F6DCF8` + high-score | **CLOSED** |
+| 個人 K/D | 公開規則與結果行為 | `ui` / result 資源體系 | `F6DCF8/F6DCFC` | **CLOSED** |
+| Team Survival Kill target | 有 50/100/200 | `ui` resource tree | per-player Kill state | **CLOSED（aggregation 未完）** |
+| per-player Kill / Death storage | 無 internal field | client data tree 分層 | 16-slot state sync | **CLOSED** |
+| `dword_F33184` 公開語意 | Tournament Wiki 有不同的 tie-break 規則 | 未找到對應 concrete resource identity | C 僅可靠觀察到 comparator read | **OPEN** |
+| 165 → Kill/Death mutation | 無直接 packet 說明 | 未閉合 | 未找到可靠 increment path | **OPEN** |
+
+## 13. Server reconstruction 建議
+
+先定義：
 
 ```text
 PlayerScore
 ├─ Kill: int
 ├─ Death: int
-└─ TieBreak: int   // 對應 dword_F33184，public semantic 尚待確認
+└─ UnknownTieBreak: int
 ```
 
-而：
+之後由 mode 層處理：
 
 ```text
-TeamScore
-RoundScore
-GameResult
+PlayerScore
+    ↓
+ModeRule aggregation
+    ↓
+RoundResult / TeamResult / GameResult
 ```
 
-不要直接與 `PlayerScore.Kill` 混成同一欄位；它們應由 mode-specific rule 聚合。
-
-### Server reconstruction 禁止的過早假設
+而 `Y_TCP_INF_REQ (165)` 先以：
 
 ```text
-❌ client 本地收到一次 Damage 就自己 Kill++
-❌ client 自己判定 Death++
-❌ 165 == Kill event
-❌ F6DCF8 == TeamKills
+Opcode = 165
+Subtype = payload[1]
+VariantPayload = subtype-specific
 ```
 
-只有找到 receive handler、state mutation 或其他更直接證據後才提升 confidence。
+處理，不要先把它硬編成 `DamagePacket` 或 `KillPacket`。
 
-## 11. 三方證據矩陣
-
-| 主題 | Wiki | Extracted / RES | IDA C | 狀態 |
-|---|---|---|---|---|
-| 個人サバイバル以 Kill 決勝 | 有 | UI/resource identity 間接支持 | `F6DCF8` + high-score | CLOSED |
-| 個人 K/D | 公開規則涉及勝負與死亡/重生 | `KILL` / `DEATH` resource/UI key | `F6DCF8/F6DCFC` | CLOSED |
-| Team Survival Kill target | 有 50/100/200 | Team result UI keys | per-player Kill state | CLOSED（聚合層仍續追） |
-| Kill / Death per-player storage | 無直接 internal field | result UI/resource | 16-slot synchronized state | CLOSED |
-| 165 → Kill/Death mutation | 無直接 packet 說明 | 未閉合 | 未找到 increment path | OPEN |
-
-## 12. 下一個真正值得閉合的問題
+## 14. 下一個閉合目標
 
 ```text
-server/player-state sync parser
+165 outgoing variants
         ↓
-F6DCF8/F6DCFC 的來源
+GameNetwork receive dispatcher
         ↓
-是哪一種 incoming packet 寫入？
+165/166 concrete handler
         ↓
-是否由 165、159/160、其他 gameplay opcode 更新？
+player-state mutation
         ↓
-mode-specific aggregation
+F6DCF8 / F6DCFC
         ↓
-round/game end
+mode aggregation
+        ↓
+round / timeout / game end
 ```
 
-這一條一旦閉合，才可以把目前的 scoreboard state 提升成可實作的 Server `ScoreManager` 協定。
+只有把這條鏈做出可靠 evidence graph，才適合把目前的 `PlayerScore` 變成真正可實作的 Server protocol contract。
