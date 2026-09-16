@@ -1,8 +1,39 @@
 # PaperMan 逆向研究
 
 > 研究日期：2026-09-16
+> 研究目標 Client：**日本版 PaperMan 2016 年最終版／服務終了時 Client**
+> 日本服務於 **2016-12-26 12:00** 終止，因此本研究的 Client／Resource／Protocol 統一以這個最終版本為核心；Wiki 則優先視為最終服務期的歷史玩家可見資料，較早版本另行標記。
 
 本目錄集中保存 PaperMan 日版客戶端的逆向、遊戲機制、封包協定與資源交叉驗證結果。
+
+## 研究範圍與版本原則
+
+```text
+Primary target
+    = 2016 Japan final Client build
+
+Primary executable evidence
+    = PaperMan.exe
+    = PaperMan.exe.c
+    = PaperMan.exe.lst.zip
+
+Primary resource evidence
+    = Extracted/
+
+Historical/public behavior evidence
+    = Japanese PaperMan Wiki / archived player research
+```
+
+任何 rule、packet、resource mapping 都必須先回答：
+
+```text
+這是不是 2016 final Client 的行為？
+還是更早／更晚版本的歷史資料？
+```
+
+同名 mode、同名 packet、同名 resource 在不同年份不保證語意或數值相同。較早版本資料不得直接覆蓋 2016 final Client 的實作；它只能作為版本差異、演進與反證證據。
+
+日本 Wiki 本身最後更新於 2016-12-26，因此對 final-service behavior 具有特別價值，但 Wiki 中仍可能混有更早歷史條目與舊版說明；每一條都要視其日期／版本註記處理。
 
 ## 證據分級
 
@@ -60,7 +91,6 @@ Hex-Rays 的變數名稱、型別與部分控制流程可能是錯誤恢復結�
     -> 狀態變更
     -> GameRule / Manager
     -> 封包建立
-    -> 封包傳送
     -> 接收端 dispatcher
     -> 狀態更新
     -> UI / 資源
