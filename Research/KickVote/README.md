@@ -1,12 +1,11 @@
 # Kick Vote 研究總覽
 
 > 研究日期：2026-09-16
+> 目標版本：日本版 PaperMan 2016 年服務終了時 Client
 
-本目錄集中保存日本版 PaperMan 客戶端 Kick Vote 的完整逆向結果。研究以 `PaperMan.exe.c`、提取資源與日本 Wiki 三方交叉驗證為原則。
+本目錄保存日本版 PaperMan Kick Vote 的逆向結果。研究以 `PaperMan.exe.c`、`Extracted/`、日本 Wiki 三方交叉驗證為核心；IDA/LST/ASM 在 Hex-Rays 類型或 CFG 可疑時優先回查。
 
 ## 已確認的玩家流程
-
-日本 Wiki `操作ガイド` 描述的流程包含：
 
 ```text
 P
@@ -18,19 +17,19 @@ P
  -> 結束／結果
 ```
 
-日文原文的模式、理由與介面名稱保留，不翻譯：
+日本 Wiki `操作ガイド` 記載可用於：
 
-- `個人サバイバル`
-- `爆破ミッション`
-- `チームサバイバル`
-- `スチール`
-- `チーム戦術`
-- `練習モード`
-- `チャットルーム`
+```text
+個人サバイバル
+爆破ミッション
+チームサバイバル
+スチール
+チーム戦術
+```
 
-Wiki 說明投票時間為 70 秒，未投票者不產生有效票；目標玩家沒有投票權。可選 `チームキック` 或 `全体キック`。兩者皆需要至少 3 名符合條件的參與者。
+不可用於 `練習モード`、`チャットルーム`；投票窗口 70 秒；目標玩家不能投票；有效票全部贊成才 kick；一票反對即不能 kick；Team Kick 與 Full Kick 均要求至少 3 名符合條件的參與者；每局每人只能申請一次。
 
-六個理由的日文原文保持如下：
+六個理由維持 Wiki 原文：
 
 1. `チート行為`
 2. `ゲームプレイ妨害`
@@ -39,7 +38,7 @@ Wiki 說明投票時間為 70 秒，未投票者不產生有效票；目標玩�
 5. `アビューズ行為`
 6. `その他違反行為`
 
-## 客戶端的主要類別
+## Client 類別結構
 
 ```text
 Voter
@@ -50,64 +49,101 @@ Voter
     └── CVotingApprovalUI
 ```
 
-建立流程會配置：
+目前建立流程可觀察到：
 
 ```text
-CVotingApprovalUI  = 0x08 bytes
-CVotingStateUI     = 0xE8 bytes
-CVotingTargetUI    = 0x28 bytes
-CVoteTargetList    = 0x20 bytes
+CVotingApprovalUI = 0x08 bytes
+CVotingStateUI    = 0xE8 bytes
+CVotingTargetUI   = 0x28 bytes
+CVoteTargetList   = 0x20 bytes
 ```
 
-這證明投票不是單一 popup，而是由目標列表、投票狀態與表決介面共同組成。
+投票系統不是單一 popup，而是 target list、active state、approval UI 與 Voter state 共同構成。
 
-## 目前最重要的狀態
-
-`Voter` 中目前已恢復的關鍵行為包括：
+## 718–723 協定狀態
 
 ```text
-+20  = 投票持續時間／剩餘時間相關欄位
-+24  = 本地目標相關的額外計時狀態
-+28  = 本局／本次發起狀態
-+29  = 當前投票資格／狀態
-+30  = 本地是否已投票
-+31  = 額外結束／中止狀態
-+32  = 投票流程是否 active
-+36  = 篩選後候選數
-+40  = 全部非申請者數
-+44  = 723 結束狀態 byte
+718 GR_START_VOTING_REQ   Client -> Server   u32 + u32 + u32
+719 GR_START_VOTING_ACK   Server -> Client   u8
+720 GR_START_VOTING       Server -> Client   u32 + u32 + u32 + u32 + u8
+721 GR_DO_VOTING          Client -> Server   u8
+722 GR_VOTING_RESULT      Server -> Client   u32 + u8
+723 GR_END_RESULT         Server -> Client   u8 + u32
 ```
 
-其中部分語意已由多個函式交叉證明，部分仍維持 `[OPEN]`。
+欄位寬度均以實際 serializer/parser 優先，不以 Hex-Rays guessed prototype 為準。
 
-## 目前協定閉合度
+## 本輪新增的重要確認
+
+### 718 有 Client-side preflight gate
+
+`IVotingNetwork::sub_A191D0` 在建立 718 前先呼叫 `sub_A17340`。其底層 `sub_A17290` 明確使用 `scope`：
 
 ```text
-718 GR_START_VOTING_REQ   [高]
-719 GR_START_VOTING_ACK   [欄位寬度高，enum OPEN]
-720 GR_START_VOTING       [高]
-721 GR_DO_VOTING          [高]
-722 GR_VOTING_RESULT      [高]
-723 GR_END_RESULT         [高，enum OPEN]
-
-396 PM_KICKUSER_REQ       [body OPEN]
-397 PM_KICKUSER_ACK       [u8 高，enum OPEN]
+scope == 0 -> Voter +36 >= 2 才回傳可申請
+scope == 1 -> Voter +40 >= 2 才回傳可申請
 ```
 
-注意：396/397 屬於 Master／房間層，不能與 718–723 合併。
+只有判定為可申請後才建立 718。`Voter +28 == 1` 時直接拒絕再次申請。
 
-## 最重要的未解問題
+這與 Wiki 的「Team/Full 至少 3 人」規則吻合，但 `+36/+40` 不是可直接命名成總玩家數的欄位；C 使用 `>=2`，表示其計數口徑至少排除了某個角色／發起者。
 
-- 719 status 的完整 enum。
-- 720 第 5 個 byte 的精確原始語意。
-- 723 第一個 byte 的完整 enum。
-- 投票 timeout 與「有效票」的伺服器最終判定。
-- 投票完成後真正踢人的跨層流程。
-- 396 request 的實際 body。
-- 投票 UI localization 資源 ID 對應的日文原文。
+### Candidate eligibility 不是單純 online count
 
-詳見：
+`CVoteTargetList` 會排除 local player，並區分全部候選與通過 `sub_67DDD0` 的候選。
 
-- `Protocol.md`
-- `UI_State.md`
-- `Master_Room.md`
+`sub_67DDD0(slot)` 至少確認：
+
+```text
+slot < 16
+以及 sub_67D520(slot) == sub_67D240()
+```
+
+所以 Server reconstruction 不應只實作 `room.players.count >= 3`；候選 set 與 voter set 的定義仍需和 Player/Session state 一起還原。
+
+### Vote byte 已閉合
+
+721/722 的 vote 欄位都是 `u8`。`sub_A1A9D0`：
+
+```c
+vote != 0 -> YES
+vote == 0 -> NO
+```
+
+這是 Client 的確定語意；Server 仍應自行驗證 voter 是否具資格、是否已投票、是否為 target。
+
+### 720 duration 已閉合到毫秒尺度
+
+720 第四個 DWORD 進入 Voter timer，之後以 elapsed milliseconds 扣減；UI 使用 `remaining / 1000` 並送到 `Vote_Digit`。
+
+Wiki 給出的投票限制為 70 秒，因此 Server 相容值為 `70000 ms`。這是 Wiki + Client 行為的 cross-source inference，不是目前已找到的 C literal。
+
+### 3000 ms 不是投票窗口
+
+Client 還有 `3000` 的局部 UI/result timer。它與 720 的 70 秒投票 duration 必須分開，不能因為看到 `3000` 就把 vote timeout 寫成 3 秒。
+
+## 396/397 分層
+
+```text
+718–723 = Game/Gameplay voting
+396/397 = Master/Room kick
+```
+
+目前沒有足夠 binary evidence 證明 723 成功後一定直接建立 396；兩條鏈是否在 shared kick implementation 匯合仍為 OPEN。
+
+## 目前仍未封閉
+
+- 719 status enum 與 localization。
+- 720 最後 byte 的 concrete meaning。
+- 723 result byte enum。
+- `sub_67D520/sub_67D240` 的完整 player/session state meaning。
+- Server voter set、timeout、missing vote、early-end 與最終 kick 條件的完整實作。
+- 396 request body/caller。
+- 8-byte outer framing 的 sequence/encryption/checksum 細節。
+- localization store 中 0x369/0x36A/0x373..0x379/0x892/0x893 等 ID 的最終日文 literal。
+
+詳細內容：
+
+- `Protocol.md` — 718–723 payload、data flow、資格 gate、跨層關係
+- `UI_State.md` — UI/state machine、candidate list、timer、duplicate-vote lock
+- `Master_Room.md` — 396/397 Master/Room layer
