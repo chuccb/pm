@@ -2,11 +2,11 @@
 
 > 研究日期：2026-09-17  
 > Target：PaperMan 日本版 2016 結束營運時最終版 Client  
-> Evidence：IDA `PaperMan.exe.c` exact parser/serializer trace + dispatcher + Resource cross-check + Wiki
+> Evidence：IDA `PaperMan.exe.c` exact parser/serializer trace + dispatcher + Resource/action table + Wiki
 
 ## 1. Confirmed packet family
 
-Gameplay TCP receive dispatcher contains:
+Gameplay TCP dispatcher：
 
 ```text
 960 → sub_566B30
@@ -14,7 +14,7 @@ Gameplay TCP receive dispatcher contains:
 963 → sub_5672E0
 ```
 
-Client send path:
+Client request serializer：
 
 ```text
 sub_566F50
@@ -22,38 +22,40 @@ sub_566F50
     → sub_555090(send)
 ```
 
-Therefore the DropWeapon family is at least:
+Current names / direction:
 
 ```text
-960  Server → Client  GGWeaponPickUpDestroyNotify
-961  Server → Client  GGDropWeapon... state/appearance notify
-962  Client → Server  GGDropWeaponGetAndDropReq
-963  Server → Client  GGDropWeaponGetAndDropAck
+960 Server → Client  GameNetwork::OnGGWeaponPickUpDestroyNotify
+961 Server → Client  dropped weapon/world-object update
+962 Client → Server  GameNetwork::OnSendGGDropWeaponGetAndDropReq
+963 Server → Client  GameNetwork::OnGGDropWeaponGetAndDropAck
 ```
 
-The exact public names of 961 beyond the extracted Client string are still kept conservative.
+These form a stateful dropped-object protocol, not a single request/response struct.
 
 ---
 
 ## 2. Packet 960 — `OnGGWeaponPickUpDestroyNotify`
 
-Exact parser:
+Parser:
 
 ```text
 u8 count
-repeat count:
-    u16 dropped_weapon_id
+repeat up to count:
+    u16 dropped_object_id
 ```
 
-Loop terminates early if `dropped_weapon_id == 0`.
+Loop exits early when `dropped_object_id == 0`.
 
-For each nonzero ID:
+Each nonzero ID is passed to:
 
 ```text
-sub_95F8F0(dropWeaponManager, dropped_weapon_id, 0)
+sub_95F8F0(dropManager, dropped_object_id, 0)
 ```
 
-and diagnostic string explicitly identifies:
+`sub_95F8F0()` is a thin wrapper over `sub_962DF0()`.
+
+The diagnostic string is explicit:
 
 ```text
 GameNetwork::OnGGWeaponPickUpDestroyNotify
@@ -61,17 +63,20 @@ GameNetwork::OnGGWeaponPickUpDestroyNotify
 
 ### Semantic
 
-This is a Server→Client notification telling the client to remove/destroy one or more existing dropped-weapon objects by ID.
+High confidence:
 
-The `count` is a repeated-record count, but zero ID acts as an additional terminator.
+```text
+count = number of IDs in destruction notification
+u16 ID = dropped-world-object instance key
+```
 
-Do not interpret the u16 IDs as item template/resource IDs solely from width; they are specifically passed to the dropped-weapon object manager as destroy targets. The exact ID namespace remains unresolved.
+Because the ID is consumed by the drop-object manager's destroy/remove routine, do not call it a resource template ID.
 
 ---
 
-## 3. Packet 961 — dropped weapon/object spawn or state notification
+## 3. Packet 961 — server dropped-object/world-object update
 
-`sub_566BF0()` begins:
+`sub_566BF0()` parser begins:
 
 ```text
 u8 count
@@ -86,233 +91,22 @@ repeat count:
     u16 value_5
     u32 value_2_32
     u32 value_3_32
-    0x20-byte opaque/raw block
+    0x20-byte raw block
 ```
 
-Then it:
+The decompiler's local-variable packing is not sufficiently clean to freeze every displayed temporary name as a public field name. What is reliable is the serializer-reader width sequence and the downstream use.
+
+The function constructs a world-object representation, transforms its position, performs Resource lookup, and invokes:
 
 ```text
-sub_5689A0(src)
-sub_728440(...)
-resource lookup using object_or_weapon_id
-sub_95E7D0(dropWeaponManager, 0, src, 0)
+sub_95E7D0(dropManager, 0, src, 0)
 ```
 
-Coordinates are reconstructed from three 16-bit values:
+Resource path:
 
 ```text
-x = value_1
-z = value_2-like
-...
-position construction applies:
-    y + 5.0
-    y - 1000.0
-```
-
-The function also performs Resource lookup through:
-
-```text
-sub_5F5BE0(resourceTable, object_or_weapon_id)
+sub_5F5BE0(resourceTable, id)
 sub_5BB9F0(resource)
-```
-
-and applies the resource matrix/visual data.
-
-### Current semantic boundary
-
-High-confidence:
-
-```text
-961 = server→client dropped-weapon/object appearance/state records
-```
-
-Unresolved:
-
-```text
-exact object ID vs resource ID distinction
-control byte
-all u16/u32 state values
-0x20-byte block
-coordinate packing/unit
-```
-
-These must be solved from `sub_95E7D0`, `sub_5689A0`, Resource records and actual object structures before assigning public field names.
-
----
-
-## 4. Packet 962 — `OnSendGGDropWeaponGetAndDropReq`
-
-Serializer starts with:
-
-```text
-Packet opcode = 962
-```
-
-The decompiler output is affected by helper signatures that take `char` while copying 2/4 bytes; serializer definitions prove the actual copy widths:
-
-```text
-sub_592920  → exactly 1 byte
-sub_5929E0  → exactly 2 bytes
-sub_592B20  → exactly 4 bytes
-```
-
-The request logically serializes:
-
-```text
-field_00 : 2-byte a1
-field_02 : 2-byte a2 / action-id-like value
-field_04 : 1-byte v21 = *a5
-field_05 : 2-byte a3
-field_07 : 2-byte a4
-field_09 : 4-byte float-like value derived from v26
-```
-
-Important: the decompiled `SLOBYTE(v13)` at the final `sub_592B20()` call must **not** be interpreted as a 1-byte wire field. `sub_592B20()` copies 4 bytes from its argument storage; in this path `v13` is the float-like value derived from `v26`.
-
-### 4.1 `a1`
-
-Directly passed to first `sub_5929E0()` and logged as argument 1. Therefore wire width = 2 bytes.
-
-Likely object/weapon action identifier; exact namespace unresolved.
-
-### 4.2 `a2`
-
-Used to resolve:
-
-```text
-p_action = &stru_B8A19C.action + a2
-sub_535020(actionTable, p_action)
-sub_533FF0(actionTable, p_action)
-```
-
-Thus `a2` is strongly connected to an action/resource selection, not merely a random slot index.
-
-### 4.3 `v21 = *a5`
-
-Used to index local player's weapon/action state:
-
-```text
-byte_F6D8F8[playerStride * localSlot + 40 * v21]
-```
-
-so this byte is a local weapon/action slot/index candidate.
-
-### 4.4 `a3`, `a4`
-
-Serialized as 2-byte values after `v21`. They are logged separately and participate in request-state calculation. Exact public semantics remain unresolved.
-
-### 4.5 Final 4-byte field
-
-`v26` starts as `0.0`; when an action/resource entry exists, it may become:
-
-```text
-*(v24 + 1202)
-```
-
-or a calculated value from `sub_A1D480` / `sub_534A70`; otherwise default/invalid branches use `0.0` or `100000.0`.
-
-This strongly indicates a quantitative action/weapon parameter (possibly derived durability/energy/weight-like state), but **do not name it durability without further proof**.
-
-### 4.6 Request-side validation/calculation
-
-The Client resolves an action entry through `dword_EE3E98` and checks local player state. A special branch exists when action index is in a specific range and `n2` is one of:
-
-```text
-2, 6, 8, 9, 15
-```
-
-and `v20 == 0`; then a calculation through `sub_A1D480()` / `sub_534A70()` provides the final float.
-
-Therefore 962 is not a blind "pickup ID" packet: it is assembled from local weapon/action state.
-
----
-
-## 5. Packet 963 — `OnGGDropWeaponGetAndDropAck`
-
-Parser begins after gameplay gate:
-
-```text
-u8 status_or_result = v49
-```
-
-If `v49 != 0`, the handler returns early.
-
-On success (`v49 == 0`), exact sequence:
-
-```text
-u8  player/network id       = n16
-u32 value_0                 = v32
-u16 drop/object id          = v26
-u8  p_k/control              = p_k
-u16 value_1                 = n2789
-u16 value_2                 = v46
-u16 value_3                 = v47
-u16 value_4                 = v14
-```
-
-Then, **only when `n2789 != 0`**:
-
-```text
-u16 value_5 = v13
-u16 value_6 = v34
-u16 value_7 = v12
-u32 float-like value_8 = v43
-0x20-byte block = v35
-```
-
-Important type warning:
-
-```text
-sub_592B40(..., &v43)
-```
-
-copies 4 bytes even though `v43` is shown as `float`; therefore `value_8` should currently be recorded as raw 4-byte scalar / float-like, not an inferred integer.
-
-Before applying the ACK, Client queries:
-
-```text
-sub_95F600(dropWeaponManager, v26, v30, v31, &v33, &v17, &v27)
-sub_95F440(dropWeaponManager, v26)
-```
-
-Then:
-
-```text
-if v48 != nullptr && *v48 == 0:
-    v27 = v46
-    v28 = v47
-    v29 = v14
-```
-
-Finally:
-
-```text
-sub_960250(...,
-    n16,
-    v13,
-    v32,
-    n2789,
-    v34,
-    v12,
-    raw_float_bits(v43),
-    &v35,
-    &v27)
-
-sub_95F920(
-    a1,
-    v26,
-    v13,
-    v15,
-    n2789,
-    v33,
-    v32,
-    n16,
-    &v17,
-    v30[0],
-    v31[0],
-    p_k)
-
-sub_95F8F0(dropWeaponManager, v26, 0)
 ```
 
 ### Semantic boundary
@@ -320,77 +114,304 @@ sub_95F8F0(dropWeaponManager, v26, 0)
 High-confidence:
 
 ```text
-963 = successful/failed server ACK for DropWeapon Get/Drop operation
-v49 = success/error gate
-n16 = player/network identity
-v26 = dropped-weapon object ID / lookup key
-n2789 = conditional-extra-data flag or mode/state discriminator
+961 = server→client dropped-world-object appearance/state record
 ```
 
-The remaining fields need object-manager (`sub_960250`, `sub_95F920`, `sub_95F600`) and Resource cross-tracing before public names are assigned.
-
----
-
-## 6. Wiki cross-check
-
-The PaperMan Wiki's 2015 `出現アイテム一覧` documents the gameplay behavior of item drops:
+Unresolved until `sub_95E7D0` is fully modeled:
 
 ```text
-An item can appear when a player who has at least one kill is killed,
-when Item Battle is enabled.
-
-Picking it up replenishes main-weapon ammunition by 20% of original total ammo
-and grants PG.
-
-When Item Battle is disabled, a money-bundle style item drops and still grants ammo/PG.
+first u16: object instance ID vs resource/template ID
+control byte
+all secondary u16/u32 values
+0x20-byte block
+coordinate packing/unit
 ```
-
-Higher-level items can provide stronger/longer effects, and honor level affects the likelihood of stronger drops. This is an external behavior-level anchor for the drop/pickup system; it does not by itself identify packet fields. citeturn463414search1
-
-The weapon Wiki also separately confirms FIRE BOMB as a projectile weapon/resource, supporting the broader resource-ID approach used elsewhere in the Client, but it does not identify 962/963 fields. citeturn463414search10
 
 ---
 
-## 7. Current packet relationship
+## 4. Packet 962 — `GameNetwork::OnSendGGDropWeaponGetAndDropReq`
+
+Serializer begins with:
+
+```text
+Packet opcode = 962
+```
+
+The actual helper widths are direct Client evidence:
+
+```text
+sub_592920 → 1 byte
+sub_5929E0 → 2 bytes
+sub_592B20 → 4 bytes
+```
+
+Therefore apparent Hex-Rays `char` argument types must not be used to infer wire width.
+
+### 4.1 Current wire sequence
+
+The current best raw sequence is:
+
+```text
+field_00 : 2 bytes = a1
+field_02 : 2 bytes = a2 / action-table-related value
+field_04 : 1 byte  = v21 = *a5
+field_05 : 2 bytes = packed a3-related value
+field_07 : 2 bytes = a4
+field_09 : 4 bytes = float-like v26
+```
+
+`field_05` is explicitly flagged for ASM/LST verification because Hex-Rays represents the caller's temporary as a packed 64-bit object and passes `SBYTE4()` into a 2-byte serializer.
+
+### 4.2 `a2` — action/resource relation
+
+The Client forms:
+
+```text
+&stru_B8A19C.action + a2
+```
+
+and passes the entry through:
+
+```text
+sub_535020(actionTable, entry)
+sub_533FF0(actionTable, entry)
+```
+
+Thus `a2` is strongly tied to action/resource selection.
+
+### 4.3 `v21 = *a5` — local slot/index candidate
+
+It indexes:
+
+```text
+byte_F6D8F8[playerStride * localSlot + 40 * v21]
+```
+
+so it is a local weapon/action slot/index candidate.
+
+### 4.4 Final 4-byte value — quantitative action/weapon state
+
+The `v26` value starts at `0.0` and may become an action-entry value (`+1202`) or a calculation via:
+
+```text
+sub_A1D480
+sub_534A70
+```
+
+with fallback constants.
+
+The value is therefore quantitative action/weapon state. It is **not yet proven to be durability**.
+
+---
+
+## 5. Packet 963 — `GameNetwork::OnGGDropWeaponGetAndDropAck`
+
+### 5.1 Status
+
+First byte:
+
+```text
+u8 status = v49
+```
+
+`status != 0` causes early return. Zero is the success path.
+
+### 5.2 Main success body
+
+Current raw parse:
+
+```text
+u8  player/network id = n16
+u32 state/value        = v32
+u16 dropped_object_id  = v26
+u8  control             = p_k
+u16 resource/action id = n2789
+u16 value_1             = v46
+u16 value_2             = v47
+u16 value_3             = v14
+```
+
+When `n2789 != 0`, additional fields are consumed:
+
+```text
+u16 value_4
+u16 value_5
+u16 value_6
+u32 float-like/raw scalar
+0x20-byte raw block
+```
+
+Exact public semantics of these secondary fields remain open.
+
+### 5.3 Critical namespace separation
+
+`v26` is used by:
+
+```text
+sub_95F600(dropManager, v26, ...)
+sub_95F8F0(dropManager, v26, 0)
+```
+
+`sub_95F600()` searches the drop-object list by:
+
+```text
+*(dropObject + 22) == v26
+```
+
+Therefore:
+
+```text
+v26 = dropped-world-object instance ID
+```
+
+Confidence A.
+
+By contrast, `n2789` is passed inside `sub_960250()` to:
+
+```text
+sub_534D20(actionTable, n2789)
+sub_5F5BE0(resourceTable, n2789)
+```
+
+Therefore:
+
+```text
+n2789 = Resource/Action ID
+```
+
+Confidence A.
+
+These two u16 values must not be merged in the server model.
+
+### 5.4 ACK application chain
+
+```text
+963
+ ↓
+sub_960250(...)
+ ↓ resource/action + world-object state
+sub_95F920(...)
+ ↓ player weapon/action state
+sub_95F8F0(dropManager, v26, 0)
+ ↓ remove/resolve picked drop object
+```
+
+This proves that 963 is a state-changing ACK, not merely a success notification.
+
+---
+
+## 6. `sub_95F600` — dropped-object lookup
+
+`sub_95F600(dropManager, id, ...)` iterates active drop objects and compares their object field `+22` with `id`.
+
+On match it exposes object state including:
+
+```text
++38
++40
++44
++128
++132
++136
++48..+76 (8 DWORD state values)
++20
+```
+
+This is the structural bridge between the 963 object ID and the internal dropped-object object.
+
+The same object should be traced backward into 961's `sub_95E7D0()` creation path to close the server representation.
+
+---
+
+## 7. `sub_95F920` — confirmed player/action state mutation
+
+For the local-player branch, `sub_95F920()` directly updates player structures around:
+
+```text
++238740
++238964
++144208
++144210
++144220..+144248
++239576
+```
+
+It stores the received action/resource ID into the selected local slot and invokes:
+
+```text
+sub_956BB0(...)
+sub_95B9B0(...)
+sub_5F66A0(...)
+sub_5F67A0(...)
+sub_5F3A90(...)
+sub_5FF2C0(...)
+```
+
+against Resource/action metadata and current weapon state.
+
+Therefore a successful 963 can mutate actual player weapon/action state.
+
+The exact mapping of these mutations to ammo, PG, temporary item level/effect or weapon selection remains unresolved; that semantic must be established from these helpers rather than inferred from the Wiki alone.
+
+---
+
+## 8. Wiki cross-check
+
+The 2015 PaperMan Wiki `出現アイテム一覧` states that a drop can appear when a player who has at least one kill is killed, when Item Battle is enabled. Picking it up replenishes main-weapon ammunition by 20% of original total ammo and awards PG; item level changes effect strength/duration, and honor level affects drop weighting. With Item Battle disabled, a money-bundle style item still provides ammo/PG. citeturn926445search6
+
+The Wiki also has a separate `ウェポンピックアップシステム` entry, confirming weapon pickup as its own gameplay subsystem. citeturn703110search3
+
+These facts validate the overall gameplay role of the protocol but do not identify individual wire fields.
+
+---
+
+## 9. Current protocol model
 
 ```text
 961 Server → Client
     ↓
-create/update dropped-weapon world object
+create/update dropped-world object
+    ↓
+resource/template + transform + object state
 
 962 Client → Server
     ↓
 GetAndDropReq
     ↓
-local action/weapon state participates in request
+local action/weapon slot + request parameters
 
 963 Server → Client
     ↓
-GetAndDropAck
+status
     ↓
-update/apply drop result
+player id + dropped-object instance id + resource/action state
     ↓
-remove/resolve dropped object via 95F8F0/95F920/960250
+apply player/world-object state
+    ↓
+remove/resolve picked object
 
 960 Server → Client
     ↓
-destroy/remove dropped objects by u16 object IDs
+explicit dropped-object instance-id destroy list
 ```
 
-This is a **stateful object protocol**, not a single `DropItem { id, x, y, z }` message.
+The most important invariant recovered so far is:
+
+```text
+DroppedObjectInstanceId != ResourceOrActionId
+```
 
 ---
 
-## 8. Remaining proof targets
+## 10. Remaining proof targets
 
 ```text
-1. `sub_95E7D0()` exact dropped-object structure and ID namespace
-2. `sub_960250()` exact semantics of ACK values
-3. `sub_95F920()` exact inventory/ammo/PG side effects
-4. Resource IDs for dropped item types and their level variants
-5. 961 coordinate and opaque 0x20-byte block semantics
-6. 962 a1/a3/a4 and final float semantic using callers/ASM
-7. 963 conditional block (`n2789`) and all scalar widths
-8. Server-side packet send construction for 960/961/963 if recoverable from client callsites/symbol names
-9. Cross-check with Wiki `出現アイテム`, honor-gauge drop weighting, ammo/PG effects, and item-level behavior
+1. 961 exact field widths/order after ASM/LST correction
+2. 961 instance-ID assignment in sub_95E7D0
+3. sub_960250 exact semantics of all ACK state values
+4. sub_95F920 exact ammo/PG/item effects
+5. 962 a1/a3/a4 packed-wire semantics via ASM/LST
+6. 963 optional block discriminator n2789
+7. Extracted resource IDs for Item Battle drops and levels
+8. server-side sender patterns for 960/961/963 recoverable from client references
 ```
