@@ -131,15 +131,27 @@ scope 0 -> Voter +36 >= 2
 scope 1 -> Voter +40 >= 2
 ```
 
-只有 preflight 成功才會真的建立 718。這是 UI selection → Voter state → packet serialization 的實際資料流。
+只有 preflight 成功才會真的建立 718，而且 `sub_A17340()` 成功時會先將 `Voter +28 = 1`。因此 `+28` 不只是資訊欄位，而是 request/active-lock-like state；精確原始名稱仍未恢復。
 
 ## Voter lifecycle flags
 
-`sub_A17180` 可觀察到：
+`sub_A17130()` 啟動 active vote state：
 
 ```c
-*(this + 44) = a2;
-if ( *(this + 8) == *(this + 12) && *(this + 44) == 1 )
+*(this + 31) = 0;
+*(this + 44) = 0;
+*(this + 24) = 0;
+*(this + 20) = duration;
+*(this + 29) = eligibility;
+*(this + 32) = 1;
+*(this + 30) = 0;
+```
+
+`sub_A17180()` 結束/更新 result state：
+
+```c
+*(this + 44) = result;
+if ( *(this + 8) == *(this + 12) && result == 1 )
     *(this + 24) = 3000;
 *(this + 29) = 0;
 *(this + 32) = 0;
@@ -165,7 +177,7 @@ if ( *(this + 29) == 0 )
 return 1;
 ```
 
-因此 `+30` 是本地 already-voted flag，而 `+29` 是該時點的 local voting state/eligibility flag。
+因此 `+30` 是本地 already-voted flag，而 `+29` 是該時點的 local voting eligibility/active state。
 
 ## Re-press / invalid-state handling
 
@@ -199,6 +211,33 @@ otherwise
 
 這表示「已投票」「當前可投票」「投票流程 active」「候選列表是否可接受」是獨立條件；Server state model 不應壓成單一 boolean。
 
+## 719 status dispatch
+
+`GR_START_VOTING_ACK`：
+
+```text
+payload = u8 status
+```
+
+接收 virtual dispatch 的單一參數與 `IVotingNetwork::sub_A19380(int)` 對應度很高。`sub_A19380()`：
+
+```text
+status 0 -> 清掉 UI pulse，active-flow flag 保留
+status 1 -> message 878，active-flow flag 保留
+status 2 -> message 880
+status 3 -> message 879
+```
+
+因此現在可把：
+
+```text
+719 -> IVotingNetwork::sub_A19380
+```
+
+視為高 confidence concrete dispatch mapping。
+
+但 `0/1/2/3` 的產品層 enum 名稱，以及 878/879/880 對應的最終日文訊息仍 `[OPEN]`。
+
 ## Vote aggregation
 
 `sub_A1A9D0`：
@@ -217,7 +256,7 @@ else
 nonzero = YES
 ```
 
-若 caller 代表 local applicant，`sub_A1A970` 還會把非零 vote 保存至另一個 local-result flag，顯示 applicant 與一般 voter 的結果處理存在差別。
+若 caller 代表 local applicant，`sub_A1A970` 另有 applicant-result UI 狀態。這表示 applicant 與一般 voter 的 UI/result state machine 有分支差異。
 
 ## Active vote state
 
@@ -227,19 +266,19 @@ nonzero = YES
 u32 reason
 u32 applicant_id
 u32 target_id
-u32 duration_ms
+u32 duration
 u8  control
 ```
 
 第四個 DWORD 進入 Voter timer；`sub_A17380(elapsed)` 每次扣減並 clamp 0。`VoterMgr::sub_A19940` 再把剩餘值送到 `CVotingStateUI`。
 
-`CVotingStateUI::sub_A1BF30` 以：
+`CVotingStateUI` 顯示 path 以：
 
 ```c
 remaining / 0x3E8u
 ```
 
-送入 `Vote_Digit`，所以它是 millisecond-scale vote duration/remaining time。
+形成 `Vote_Digit` 的秒數，所以 duration 是 millisecond-scale。
 
 日本 Wiki 為 70 秒，因此 server compatibility 值可推導為：
 
@@ -249,24 +288,81 @@ remaining / 0x3E8u
 
 這仍是 Wiki + Client behavior inference，不是目前找到的 C literal。
 
-## 3000 ms 是另一層
+## 720 control 與 State UI 的修正
 
-`sub_A17180` 在特定 local/result transition 將 `+24` 設為 `3000`；`CVotingStateUI::sub_A1B900` 也有 `+76 = 3000` 的 local UI phase。
-
-這些 3000ms timers 不可與 720 的 70-second voting window 混淆。
-
-## 720 control 與 applicant identity 必須分開
-
-`sub_A1A830` 的 data flow：
+舊結論：
 
 ```text
-+88 <- applicant == local_player
 +91 <- 720 final byte
-+92 <- VotingAble()
-+93 <- active/display update state
 ```
 
-尤其 `+88` 與 `+91` 來源不同，因此不能把 720 最後 byte 直接命名成 `isApplicant` 或 `isVoter`。
+已證明錯誤。
+
+`sub_A19460()` 的實際鏈條：
+
+```text
+720 field4
+   |
+   +-- == 0 --> call virtual predicate with applicant ID
+   |             -> v25 = predicate result
+   |
+   +-- != 0 --> skip predicate
+                 -> v25 remains 1
+
+v25 -----------------> CVotingStateUI::sub_A1A830(..., a7=v25)
+                           |
+                           +--> UI +91 = v25
+```
+
+同一時間 `sub_A1A830()` 另存：
+
+```text
++88 = applicant == local player
++17 = duration
++91 = eligibility predicate result (v25)
+```
+
+而 `VoterMgr::sub_A19940()` 在 update path 將：
+
+```text
+StateUI +92 = sub_A1A6D0()
+StateUI +93 = active/display-update condition
+```
+
+所以目前正確模型是：
+
+```text
+720 field4
+    = applicant-eligibility predicate gating/control byte [OPEN]
+
+StateUI +91
+    = predicate result
+
+StateUI +88
+    = applicant-is-local
+```
+
+不能把 field4 直接命名成 `isApplicant`、`isVoter` 或 `result`。
+
+## 3000 ms 是另一層
+
+`sub_A17180()` 在 local-target/result condition 下將 Voter `+24` 設為 `3000`；`CVotingStateUI::sub_A1B900()` 也有獨立 `+76 = 3000` result/phase timer。
+
+這些 3000ms timers 不可與 720 的 voting duration 混淆。
+
+## 139 lifecycle signal
+
+`VoterMgr::sub_A19A70()`：
+
+```c
+Packet::possible_ctor_or_dtor_0(v1, 139);
+sub_58D7D0(byte_13242F8, v1);
+byte_2317C68 = 1;
+```
+
+而 `sub_A17380()` 只有在 `byte_2317C68 == 0` 時才更新某段 result/phase countdown，因此 139 與 voting lifecycle/control 明確相關。
+
+精確 semantic 仍 `[OPEN]`，不先命名成 `END_VOTE` / `CANCEL_VOTE`。
 
 ## 723 result
 
@@ -277,7 +373,25 @@ remaining / 0x3E8u
 +0x01 u32 player_id
 ```
 
-`sub_A19770` 保存 player identity，再把 result byte 送入 `sub_A17180`。目前只能確定它是 result/state byte；不要把值 1 未經證據直接命名為 `KICKED` 或 `SUCCESS`。
+`sub_A19770()`：
+
+```text
+player_id -> Voter identity
+result byte -> sub_A17180()
+```
+
+`sub_A1A970()` 只處理 UI-side result presentation data，之後 `sub_A18F80(..., 0)` 做 voting UI cleanup。
+
+因此目前能確定的是：
+
+```text
+723
+  -> result state mutation in Voter
+  -> optional player lookup / result UI
+  -> cleanup
+```
+
+尚不能從這條 Client chain 宣稱它直接移除 room/player。
 
 ## State machine
 
@@ -302,14 +416,15 @@ Target Selection (<=8/page)
  |
  +--> 720 active vote
           |
+          +--> applicant predicate / UI state
           +--> countdown
-          +--> eligible voter check
           +--> 721 vote
           +<-- 722 voter result
           +--> 723 final result
- |
- v
-Result / cleanup
+                    |
+                    +--> Voter result state
+                    +--> UI cleanup
+                    +--> [actual room/player kick unresolved]
 ```
 
 ## Evidence status
@@ -321,11 +436,14 @@ Result / cleanup
 - Target list records are 36-byte entries.
 - Candidate enumeration excludes local player.
 - Candidate eligibility reaches player/session state.
-- 718 request is gated by Voter state before serialization.
+- 718 request is gated by Voter state and successful preflight sets `+28`.
+- 719 status payload is one byte; `sub_A19380` is a high-confidence concrete target for the corresponding single-argument network dispatch.
 - 721/722 vote field is a byte; client aggregation uses zero vs nonzero.
 - 720 fourth field is millisecond-scale timer.
+- 720 final byte gates an applicant predicate; it is not directly copied to StateUI +91.
 - applicant identity and voting eligibility are independent state.
 - local duplicate-vote state exists.
+- 723 direct Client responsibility is result/UI state transition, not yet proven room occupancy mutation.
 
 ### Cross-source
 
@@ -336,9 +454,10 @@ Result / cleanup
 
 ### Open
 
-- 719 status enum and concrete vtable target.
-- 720 control byte concrete semantic.
-- 723 result enum.
-- 0x369/0x36A/0x373..0x379/0x892/0x893 final localization literals.
+- 719 status `0..3` product semantics / localization.
+- 720 control byte final server semantic and allowed values.
+- 723 result enum and server-side final-action contract.
+- 139 lifecycle semantic.
 - `sub_67D520` / `sub_67D240` player/session semantics.
 - complete server-side voter set, timeout, missing-vote, early-end and final kick action.
+- localization literals for 878/879/880 and 892/893.
