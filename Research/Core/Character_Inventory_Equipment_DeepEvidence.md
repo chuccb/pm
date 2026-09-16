@@ -230,7 +230,7 @@ Wiki:   Main / Sub / Melee / Throwing
 
 `Primary ≈ Main` and `Secondary ≈ Sub` is strongly supported, but the canonical server enum name should remain a project-level choice rather than being presented as a recovered wire string.
 
-## 12. Weapon `SwitchWeaponSlot` is separate from the four persisted slots
+## 12. `SwitchWeaponSlot` is separate from the four persisted slots
 
 `SWITCHWEAPONSLOT` maps to `+144338`.
 
@@ -268,7 +268,7 @@ if component0 != 0:
 
 `sub_524A50()` serializes the exact inverse.
 
-This means a reconstruction must **not** assume one fixed payload size for every weapon record. In particular, `type == 3` omits three `u16` values.
+This means a reconstruction must **not** assume one fixed payload size for every weapon record. In particular, `type == 3` omits component1..component3.
 
 The eight trailing values are preserved as `8 × serializer units`; their exact primitive width/name should be closed by tracing `sub_592AA0` before being normalized into the server protocol schema.
 
@@ -451,35 +451,6 @@ For an eventual C# server, use domain objects/records with neutral names until p
 - `222/223` exact character-switch semantics
 - profile/item/appearance synchronization around 197–200
 
-## 22. Evidence references from the 2016 client
-
-Key recovered functions/regions:
-
-```text
-sub_522580      component-mask regeneration
-sub_524010      composite parser
-sub_5241C0      composite serializer
-sub_5244E0      single composite serializer
-sub_524880      weapon record parser
-sub_524A50      weapon record serializer
-sub_524B70      5120-item parser
-sub_525450      composite comparison
-sub_525680      weapon-block comparison
-sub_525790..    composite accessors
-sub_527DB0      weapon resource validation
-sub_5280F0      composite validation/resource build
-sub_534450      runtime item/durability state update
-sub_534530      current/base percentage calculation
-sub_534A70      runtime current-value lookup
-sub_534B60      resource base-value lookup
-sub_534660      weapon-slot durability calculation
-sub_533F50/80   namespace decoding
-sub_533FB0/FF0  resource-manager lookup helpers
-sub_572EB0      GM_CREATECHAR_REQ serializer
-sub_572F80      GM_CREATECHAR_ACK parser
-sub_556730      GP_CHPLAYC_ACK parser
-```
-
-## 23. Research hygiene
+## 22. Research hygiene
 
 Keep this file synchronized with the broader `Research/Core` documents. Prefer updating an existing section when a conclusion changes rather than creating duplicate MD files. Never promote a D-level inference to a protocol fact merely because the name looks obvious.
