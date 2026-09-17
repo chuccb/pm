@@ -78,7 +78,7 @@ def check_file(path: Path) -> list[str]:
 
 
 def indexed_research_files() -> set[str]:
-    """讀取唯一索引，取得其中指向的 Research Markdown 路徑。"""
+    """從唯一研究索引取得明確列出的 Research Markdown 路徑。"""
     index_path = ROOT / "Research" / "DOCUMENT_INDEX.md"
     content = index_path.read_text(encoding="utf-8")
     indexed: set[str] = set()
@@ -87,14 +87,15 @@ def indexed_research_files() -> set[str]:
         target = match.group(1).split("#", 1)[0].strip()
         if not target.lower().endswith(".md"):
             continue
-        target_path = Path("Research") / target
-        indexed.add(target_path.as_posix())
+        if target.startswith(("http://", "https://")):
+            continue
+        indexed.add((Path("Research") / target).as_posix())
 
     return indexed
 
 
 def check_index_coverage(markdown_files: list[Path]) -> list[str]:
-    errors: list[str] = []
+    """只阻止新的 Research Markdown 漏掉唯一索引；不強制重寫既有索引連結。"""
     index_path = ROOT / "Research" / "DOCUMENT_INDEX.md"
     if not index_path.exists():
         return [f"{index_path}: 找不到唯一研究文件索引"]
@@ -108,16 +109,7 @@ def check_index_coverage(markdown_files: list[Path]) -> list[str]:
     }
 
     missing = sorted(research_files - indexed)
-    for path in missing:
-        errors.append(f"{path}: 尚未出現在 Research/DOCUMENT_INDEX.md")
-
-    stale = sorted(indexed - research_files)
-    for path in stale:
-        if path == "Research/DOCUMENT_INDEX.md":
-            continue
-        errors.append(f"Research/DOCUMENT_INDEX.md: 索引指向不存在的文件 {path}")
-
-    return errors
+    return [f"{path}: 尚未出現在 Research/DOCUMENT_INDEX.md" for path in missing]
 
 
 def main() -> int:
