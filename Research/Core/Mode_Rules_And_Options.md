@@ -4,6 +4,42 @@
 > 更新基準：2026-09-17。
 > 文件責任：集中各遊戲模式的玩家可見規則、Client mode builder、selector index/value、版本差異與 Runtime 待閉合項目。Room 通用 wire schema 仍由 Room 相關主文件維護。
 
+## 先看這裡：這份文件回答什麼
+
+如果問題是「這個模式有哪些規則值、OptionIndex 與 OptionValue 是什麼、模式規則如何映射到 Runtime」，看這份文件。
+
+如果問題是「Room setting packet 怎麼編碼」，看：
+
+```text
+Room_Settings_Packets.md
+Room_Channel_GameRule_101_192_Field_Evidence.md
+Channel_Lobby_193_221_Field_Evidence.md
+```
+
+如果問題是「遊戲進行中某個事件如何改 state」，看：
+
+```text
+Gameplay_Network.md
+Combat_Damage.md
+UDP_Move_Inf_DeepEvidence.md
+```
+
+最短理解路徑：
+
+```text
+Mode
+  ↓
+OptionIndex
+  ↓
+OptionValue
+  ↓
+Room state
+  ↓
+CGameRule / ModeRuntime
+  ↓
+Win / Round / Objective condition
+```
+
 ## 1. 核心模型：Mode、OptionIndex、OptionValue 必須分離
 
 Room selector entry 一般為：
