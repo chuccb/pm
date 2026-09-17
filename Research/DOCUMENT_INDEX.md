@@ -16,13 +16,13 @@
 |---|---|
 | [Research/README.md](README.md) | 整體研究目標、版本基準、證據方法與研究方向 |
 | [Core/README.md](Core/README.md) | Core 研究範圍與文件導航，不承載單一主題詳細證據 |
-| [KickVote/README.md](KickVote/README.md) | Kick Vote 專題主入口 |
+| [KickVote/README.md](KickVote/README.md) | Kick Vote 專題入口與文件分工 |
 
 ## 二、基礎傳輸、封包與 Dispatcher
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Foundation_TCP_Handshake_Login_Protocol.md](Core/Foundation_TCP_Handshake_Login_Protocol.md) | TCP、握手、登入與基礎協定骨架 |
+| [Core/Foundation_TCP_Handshake_Login_Protocol.md](Core/Foundation_TCP_Handshake_Login_Protocol.md) | TCP frame、完整性/XOR transform 與共用 fixed-width codec 基礎；不重複登入 payload |
 | [Core/Network_Dispatch.md](Core/Network_Dispatch.md) | 封包註冊、接收 Dispatcher、handler 路由 |
 | [Core/Y_TCP_INF_Transport.md](Core/Y_TCP_INF_Transport.md) | `Y_TCP_INF` 傳輸層與資料流；不重複 gameplay 欄位語意 |
 | [Core/ClientData_Shared_Decoder_Field_Evidence.md](Core/ClientData_Shared_Decoder_Field_Evidence.md) | 共用 ClientData wire family 的唯一欄位／decoder 真相 |
@@ -32,8 +32,8 @@
 | 文件 | 定位 |
 |---|---|
 | [Core/Login_Adjacent_680_696_Field_Schema.md](Core/Login_Adjacent_680_696_Field_Schema.md) | `680–696` 登入鄰近協定、`681` server-list record 與登入鏈 |
-| [Core/MyInfo_198_ClientData_Field_Schema.md](Core/MyInfo_198_ClientData_Field_Schema.md) | `198` 唯一主文件：composite 順序、Profile、MyInfo／Avatar 關聯 |
-| [Core/Player_Slot_Team.md](Core/Player_Slot_Team.md) | Player slot、Team、玩家位置與隊伍狀態 |
+| [Core/MyInfo_198_ClientData_Field_Schema.md](Core/MyInfo_198_ClientData_Field_Schema.md) | `198` 唯一主文件：top-level composite 順序、MyInfo／Avatar hydration 與未閉合欄位 |
+| [Core/Player_Slot_Team.md](Core/Player_Slot_Team.md) | Player slot、Player ID、Team／Group、玩家有效狀態 |
 | [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character、Inventory、Equipment、Weapon 與 Runtime 語意主文件 |
 | [Core/Currency_State_Field_Evidence.md](Core/Currency_State_Field_Evidence.md) | PG、CASH、CP 與帳戶經濟欄位證據 |
 
@@ -41,7 +41,7 @@
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Channel_Lobby_193_221_Field_Evidence.md](Core/Channel_Lobby_193_221_Field_Evidence.md) | `193–221` packet、parser、serializer 與欄位真相 |
+| [Core/Channel_Lobby_193_221_Field_Evidence.md](Core/Channel_Lobby_193_221_Field_Evidence.md) | `193–221` top-level packet、parser、serializer 與欄位真相；198 nested codec 另見專屬主文件 |
 | [Core/Channel_Lobby_Lifecycle.md](Core/Channel_Lobby_Lifecycle.md) | Channel → Lobby → Room 高階生命週期 |
 | [Core/Room_Channel_GameRule_101_192_Field_Evidence.md](Core/Room_Channel_GameRule_101_192_Field_Evidence.md) | `101–192` packet、parser、serializer 與欄位真相 |
 | [Core/Room_Settings_Packets.md](Core/Room_Settings_Packets.md) | Room UI selector/value、設定封包與設定資料流主文件 |
@@ -53,7 +53,7 @@
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Mode_Rules.md](Core/Mode_Rules.md) | 各模式玩家可見規則、版本差異與 Runtime 待閉合項目 |
+| [Core/Mode_Rules.md](Core/Mode_Rules.md) | 各模式玩家可見規則、版本差異與 Runtime 待閉合項目；不重複 selector value |
 | [Core/Mode_Option_Tables.md](Core/Mode_Option_Tables.md) | mode-specific selector index/value 的唯一主文件 |
 | [Core/Gameplay_166_DeepEvidence.md](Core/Gameplay_166_DeepEvidence.md) | `166` Gameplay、死亡、K/D、Quest hook 與深入證據 |
 
@@ -62,7 +62,7 @@
 | 文件 | 定位 |
 |---|---|
 | [Core/Combat_Hit_Detection.md](Core/Combat_Hit_Detection.md) | 命中判定與戰鬥事件 |
-| [Core/Damage_Calculation.md](Core/Damage_Calculation.md) | 傷害計算與相關 Runtime 邏輯 |
+| [Core/Damage_Calculation.md](Core/Damage_Calculation.md) | Damage modifier／transform 與 Runtime 計算；不重複 165 packet family |
 | [Core/Y_TCP_INF_Damage.md](Core/Y_TCP_INF_Damage.md) | `Y_TCP_INF` 165/166 family、handler 與 state 證據 |
 | [Core/UDP_Move_Inf_DeepEvidence.md](Core/UDP_Move_Inf_DeepEvidence.md) | UDP 8/24、Queue、27-byte actor record 與欄位證據 |
 | [Core/DropWeapon_Protocol.md](Core/DropWeapon_Protocol.md) | 丟棄武器封包與流程 |
@@ -80,14 +80,14 @@
 | 文件 | 定位 |
 |---|---|
 | [Core/Quest_Event_ID_Mapping.md](Core/Quest_Event_ID_Mapping.md) | Quest/Event 與 ID mapping 字典 |
-| [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | 遊戲資源封裝與資料模型 |
+| [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | 遊戲資源封裝、資料來源與 loader/runtime 邊界 |
 
 ## 九、Kick Vote
 
 | 文件 | 定位 |
 |---|---|
-| [KickVote/README.md](KickVote/README.md) | Kick Vote 主入口與目前結論摘要 |
-| [KickVote/Evidence_And_Eligibility.md](KickVote/Evidence_And_Eligibility.md) | Wiki、C、資源與候選資格證據 |
+| [KickVote/README.md](KickVote/README.md) | Kick Vote 專題入口與目前文件分工 |
+| [KickVote/Evidence_And_Eligibility.md](KickVote/Evidence_And_Eligibility.md) | Wiki、C、資源與 voter／target 資格證據 |
 | [KickVote/Protocol.md](KickVote/Protocol.md) | `718–723` 協定與資料流 |
 | [KickVote/UI_State.md](KickVote/UI_State.md) | 投票 UI、狀態機、計時器與候選清單 |
 | [KickVote/Master_Room.md](KickVote/Master_Room.md) | `396/397` Master／Room 層協定 |
