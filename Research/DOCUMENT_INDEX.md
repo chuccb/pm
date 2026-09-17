@@ -22,7 +22,7 @@
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、integrity/XOR、checksum、共用 codec、submission、opcode registration 與 dispatcher；原 `Foundation_TCP_Handshake_Login_Protocol.md`、`Network_Dispatch.md`、`Y_TCP_INF_Transport.md` 已整合於此 |
+| [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、integrity/XOR、checksum、共用 codec、submission、opcode registration 與 dispatcher |
 
 ## 三、登入、ClientData、玩家資料與裝備
 
@@ -38,21 +38,21 @@
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Room_Lobby_GameRule.md](Core/Room_Lobby_GameRule.md) | Channel → Lobby → Room、Player Slot／Team、Map、Room selector 與 CGameRule 生命週期的大方向主文件；原 `Channel_Lobby_Lifecycle.md`、`Player_Slot_Team.md`、`Map_And_Room.md` 與 `GameRule_Lifecycle.md` 的大方向內容已集中於此 |
+| [Core/Room_Lobby_GameRule.md](Core/Room_Lobby_GameRule.md) | Channel → Lobby → Room、Player Slot／Team、Map、Room selector 與 CGameRule 生命週期的大方向主文件 |
 | [Core/Room_Channel_GameRule_101_192_Field_Evidence.md](Core/Room_Channel_GameRule_101_192_Field_Evidence.md) | `101–192` 精確 packet、parser、serializer 與欄位證據 |
 | [Core/Channel_Lobby_193_221_Field_Evidence.md](Core/Channel_Lobby_193_221_Field_Evidence.md) | `193–221` 精確 top-level packet、parser、serializer 與欄位證據 |
 | [Core/Room_Settings_Packets.md](Core/Room_Settings_Packets.md) | Room selector/value、設定封包與 UI data-flow 的詳細證據 |
 | [Core/Server_State_Model.md](Core/Server_State_Model.md) | 跨 Packet／跨子系統的 Server reconstruction 抽象模型 |
 
+`GameRule_Lifecycle.md` 目前仍存在時，僅作歷史遷移殘留；研究主內容以 `Room_Lobby_GameRule.md` 為唯一大方向主線，不得再更新舊檔形成第二份真相。
+
 ## 五、遊戲模式、Gameplay、戰鬥、移動與武器事件
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Mode_Rules.md](Core/Mode_Rules.md) | 各模式規則、版本差異與 Runtime 待閉合項目 |
-| [Core/Mode_Option_Tables.md](Core/Mode_Option_Tables.md) | mode-specific selector index/value 的主文件 |
-| [Core/Gameplay_166_DeepEvidence.md](Core/Gameplay_166_DeepEvidence.md) | `166` Gameplay、死亡、K/D、state 與 subtype 深入證據 |
-| [Core/Y_TCP_INF_Damage.md](Core/Y_TCP_INF_Damage.md) | `165/166 Y_TCP_INF` gameplay/event family、sender/receiver 與 state 證據 |
-| [Core/Combat_Damage.md](Core/Combat_Damage.md) | Hit Detection、Combat geometry、Damage modifier 與 `165` 建包前計算的整合主文件；原 `Combat_Hit_Detection.md`、`Damage_Calculation.md` 已整合於此 |
+| [Core/Mode_Rules_And_Options.md](Core/Mode_Rules_And_Options.md) | 各模式規則、Client mode builder、selector index/value、版本差異與 Runtime 待閉合項目 |
+| [Core/Gameplay_Network.md](Core/Gameplay_Network.md) | `165/166 Y_TCP_INF`、Gameplay event、166 subtype、Resource/state application 與 sender/receiver |
+| [Core/Combat_Damage.md](Core/Combat_Damage.md) | Hit Detection、Combat geometry、Damage modifier 與 `165` 建包前計算 |
 | [Core/UDP_Move_Inf_DeepEvidence.md](Core/UDP_Move_Inf_DeepEvidence.md) | UDP 8/24、Queue、27-byte actor record 與 movement/state 欄位證據 |
 | [Core/DropWeapon_Protocol.md](Core/DropWeapon_Protocol.md) | 丟棄／拾取武器事件封包與流程 |
 
@@ -60,11 +60,11 @@
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Packet_166_Field_Map.md](Core/Packet_166_Field_Map.md) | `166` 欄位快速索引；完整證據回 `Gameplay_166_DeepEvidence.md` |
+| [Core/Result_Quest_Stats.md](Core/Result_Quest_Stats.md) | Result、Score/K-D、長期統計、Quest condition 與 Assist/Football 等相關事件的整合主文件 |
 | [Core/TCP_269_Subtype7_Field_Detail.md](Core/TCP_269_Subtype7_Field_Detail.md) | `269 subtype 7` 完整欄位、玩家同步與 Result/K/D state |
-| [Core/Result_Stat_Protocol_223_245_381_389.md](Core/Result_Stat_Protocol_223_245_381_389.md) | `223–245`、`381–389` Result／Stat／Quest 主題 |
-| [Core/Quest_Event_ID_Mapping.md](Core/Quest_Event_ID_Mapping.md) | Quest/Event 與 ID mapping |
 | [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | Resource pack、資料模型與 loader/runtime 邊界 |
+
+`Packet_166_Field_Map.md` 已整合至 `Gameplay_Network.md`，`Quest_Event_ID_Mapping.md` 已整合至 `Result_Quest_Stats.md`。
 
 ## 七、Kick Vote
 
@@ -76,42 +76,6 @@
 ## 八、已完成的內容整合
 
 ```text
-Character_Inventory_Equipment_DeepEvidence.md
-    → Character_Inventory_Equipment.md
-
-Gameplay_166_KD_Field_Evidence.md
-    → Gameplay_166_DeepEvidence.md
-
-Packet_166_Field_Detail_3_15.md
-    → Gameplay_166_DeepEvidence.md
-
-UDP_Move_Inf_Field_Semantics.md
-    → UDP_Move_Inf_DeepEvidence.md
-
-TCP_269_Subtype7_Result_State.md
-    → TCP_269_Subtype7_Field_Detail.md
-
-MyInfo_198_Composite_Codec_Evidence.md
-    → MyInfo_198_ClientData_Field_Schema.md
-
-Login_681_Server_Record_Field_Schema.md
-    → Login_Adjacent_680_696_Field_Schema.md
-
-Y_TCP_INF_Handler_Details.md
-    → Y_TCP_INF_Damage.md
-
-Quest_Result_Packets_223_245.md
-    → Result_Stat_Protocol_223_245_381_389.md
-
-Score_State.md
-    → Result_Stat_Protocol_223_245_381_389.md
-
-Gameplay_Network_Events.md
-    → Gameplay_166_DeepEvidence.md
-    → Y_TCP_INF_Damage.md
-    → UDP_Move_Inf_DeepEvidence.md
-    → Result_Stat_Protocol_223_245_381_389.md
-
 Foundation_TCP_Handshake_Login_Protocol.md
 Network_Dispatch.md
 Y_TCP_INF_Transport.md
@@ -120,12 +84,27 @@ Y_TCP_INF_Transport.md
 Channel_Lobby_Lifecycle.md
 Player_Slot_Team.md
 Map_And_Room.md
+    → Room_Lobby_GameRule.md
+
 GameRule_Lifecycle.md
     → Room_Lobby_GameRule.md
 
 Combat_Hit_Detection.md
 Damage_Calculation.md
     → Combat_Damage.md
+
+Mode_Rules.md
+Mode_Option_Tables.md
+    → Mode_Rules_And_Options.md
+
+Gameplay_166_DeepEvidence.md
+Y_TCP_INF_Damage.md
+Packet_166_Field_Map.md
+    → Gameplay_Network.md
+
+Result_Stat_Protocol_223_245_381_389.md
+Quest_Event_ID_Mapping.md
+    → Result_Quest_Stats.md
 
 KickVote/Protocol.md
 KickVote/UI_State.md
@@ -144,46 +123,38 @@ KickVote/Master_Room.md
 
 ## 九、文件角色與單一大方向主文件
 
-目前以「大方向」而非單一微型功能拆分主文件：
+目前原則是：
 
 ```text
 網路／傳輸／Dispatcher
     → Network_Protocol.md
 
-登入／ClientData／玩家資料
-    → Login_Adjacent_680_696_Field_Schema.md
-    → MyInfo_198_ClientData_Field_Schema.md
-    → ClientData_Shared_Decoder_Field_Evidence.md
-    → Character_Inventory_Equipment.md
-    → Currency_State_Field_Evidence.md
-
 Channel／Lobby／Room／Player／Map／GameRule
     → Room_Lobby_GameRule.md
-    → packet detail → 101–192 / 193–221 Field Evidence
-    → Room_Settings_Packets.md
 
-Gameplay／Combat／Movement
-    → Gameplay_166_DeepEvidence.md
-    → Y_TCP_INF_Damage.md
+遊戲模式／規則／selector values
+    → Mode_Rules_And_Options.md
+
+Gameplay／165/166／遊戲事件
+    → Gameplay_Network.md
+
+Combat／Hit／Damage
     → Combat_Damage.md
-    → UDP_Move_Inf_DeepEvidence.md
-    → DropWeapon_Protocol.md
 
-Result／Quest／Resource
-    → Result_Stat_Protocol_223_245_381_389.md
-    → TCP_269_Subtype7_Field_Detail.md
-    → Packet_166_Field_Map.md
-    → Quest_Event_ID_Mapping.md
-    → Resource_Pack_Model.md
+Result／Score／Quest／Event
+    → Result_Quest_Stats.md
 
-Kick Vote
-    → KickVote/Research.md
+登入／ClientData／角色／裝備／經濟
+    → 對應 ClientData／玩家資料主文件
 
 跨全部子系統的 Server abstraction
     → Server_State_Model.md
+
+Kick Vote
+    → KickVote/Research.md
 ```
 
-仍可保留真正需要獨立維護的詳細 Field Evidence、Schema 或 Mapping 文件；但新增文件前必須證明它不是既有大方向主文件可以直接容納的內容。
+只有在「責任確實不同且無法無損放入既有大方向主文件」時才保留細部 Field Evidence、Schema 或 Resource Mapping 文件。新增文件前必須先證明其必要性。
 
 ## 十、禁止再次失控
 
