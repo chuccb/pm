@@ -8,6 +8,7 @@
 
 ```text
 怎麼傳                         → Network_Protocol.md
+UDP movement/control 深挖       → UDP_Movement_Control_Evidence_2026-09-18.md
 完整 TCP opcode → handler      → Network_Dispatcher_Inventory.md
 登入後玩家資料怎麼傳           → Login_ClientData_Protocol.md
 角色／背包／裝備的 Client 狀態 → Character_Inventory_Equipment.md
@@ -60,6 +61,7 @@ Extracted/
 | 文件 | 唯一責任 |
 |---|---|
 | `Network_Protocol.md` | TCP/UDP transport、frame、codec、integrity/XOR、checksum、dispatcher 核心、UDP movement |
+| `UDP_Movement_Control_Evidence_2026-09-18.md` | UDP movement 雙向 serializer/parser、peer endpoint、control/recovery、153–164 symbol、BulletHole 交叉證據附錄 |
 | `Network_Dispatcher_Inventory.md` | `sub_58B010` 完整 TCP opcode → handler map、UDP peer/bootstrap evidence；不重複各封包 semantic |
 | `Login_ClientData_Protocol.md` | `680–696` + `197–221` login / MyInfo / ClientData wire protocol |
 | `Character_Inventory_Equipment.md` | Character、Appearance、Inventory、Weapon Loadout、Economy runtime/domain model |
@@ -82,6 +84,7 @@ Kick Vote 位於 `../KickVote/Research.md`。
 需要 bytes → 該主題文件
     ↓
 需要 frame / transport → Network_Protocol
+需要 UDP movement/control 深證據 → UDP_Movement_Control_Evidence_2026-09-18
 需要完整 dispatcher function map → Network_Dispatcher_Inventory
 ```
 
@@ -138,3 +141,5 @@ Cross-domain abstraction → Server_State_Model
  ├─ 是 → Server_State_Model
  └─ 否 → 先檢查 DOCUMENT_INDEX / AGENTS.md
 ```
+
+> `UDP_Movement_Control_Evidence_2026-09-18.md` 是針對 UDP movement/control 這條已經膨脹到需要獨立證據附錄的主線；其 semantic truth 仍受 `Network_Protocol.md` 統一約束，不另立第二套 packet schema。
