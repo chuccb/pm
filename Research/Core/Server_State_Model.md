@@ -4,6 +4,39 @@
 > 目標版本：日本版 PaperMan 2016 年結束營運時的最終 Client。
 > 文件角色：只保存跨 Packet／跨子系統的 Server reconstruction 抽象模型，不重新複製單一封包欄位或單一功能文件的詳細證據。
 
+## 先看這裡：這份文件回答什麼
+
+如果問題是「Server 應該保存哪些狀態、這些狀態怎麼分層、不同 Packet 最後修改哪一層」，看這份文件。
+
+如果問題是「某個 Packet 到底有哪些 bytes」，不要在這裡找：
+
+```text
+Packet wire layout
+    → 對應的 Protocol / Schema / Field Evidence
+
+單一功能的 C / LST 證據
+    → 對應的功能研究文件
+
+跨域 Server graph
+    → 本文件
+```
+
+最短理解路徑：
+
+```text
+Session
+  ↓
+Room
+  ↓
+PlayerSlot[16]
+  ↓
+MatchRuntime
+  ↓
+Gameplay / Result
+  ↓
+Profile / Economy
+```
+
 ## 1. 模型原則
 
 Server reconstruction 必須嚴格區分：
