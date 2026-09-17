@@ -2,7 +2,7 @@
 
 > 研究目標：日本版 PaperMan 2016 年服務終了時的最終 Client。
 > 更新基準：2026-09-17。
-> 文件責任：集中 Result、長期統計、Score／K-D、Quest condition、Assist／Football 等結果事件與其共同資料流。避免結果與 Quest 因為不同 packet 範圍而拆成多份互相重複的主文件。
+> 文件責任：集中 Result、長期統計、Score／K-D、Quest condition、Assist／Football，以及 `TCP 269 subtype 7` 的 Server→Client player/result hydration。避免結果、Quest、269 state 因不同 packet 範圍而拆成互相重複的主線。
 
 ## 1. 整體資料流
 
@@ -20,6 +20,17 @@ Client result-state
 Quest condition evaluation
     ↓
 Result / Quest UI
+```
+
+Server→Client 的 `269 subtype 7` 是另一個重要輸入：
+
+```text
+269 subtype 7
+    → player/channel/game hydration
+    → per-player result K/D
+    → weapon/action/resource state
+    → mode-specific state
+    → global/per-player timing state
 ```
 
 必須與即時 gameplay actor state 分開：
@@ -62,6 +73,14 @@ Quest 是多來源 consumer，不是單一 Kill packet 的附屬功能。[C]
 ```
 
 這是直接 dispatcher 證據。[C]
+
+`269` 另由：
+
+```text
+269 → sub_574B20
+```
+
+再依 subtype 分支；`subtype 7` 屬大型 player/channel/game-state hydration family。[C]
 
 ## 3. 長期個人統計
 
@@ -323,7 +342,7 @@ if (DeathA == DeathB)
 return DeathA < DeathB;
 ```
 
-因此直接確認比較鏈：
+直接確認比較鏈：
 
 ```text
 Kill 高者優先
@@ -335,7 +354,7 @@ Kill 高者優先
 
 `sub_759030()` 掃描 16 個 player slot，使用同一比較鏈尋找高成績玩家，並交給 Individual Survival display。[C]
 
-日本 Wiki 的個人 Survival 規則與 Client 的 per-player K/D result state 可互相驗證；Team Survival 則仍需在 mode layer 做隊伍聚合，不應將 per-player K/D 直接當 TeamKills。[WIKI][C][X]
+日本 Wiki 的個人 Survival 規則與 Client 的 per-player K/D result state 可互相驗證；Team Survival 仍需在 mode layer 做隊伍聚合，不應將 per-player K/D 直接當 TeamKills。[WIKI][C][X]
 
 ## 11. Quest generic API：`sub_92EF00()`
 
@@ -632,19 +651,441 @@ QuestConditionEvaluation
 
 `QuestIndex`、`ValueB`、source/subtype `23` 皆不得在證據不足時直接當成正式 DB semantic。
 
-## 19. 重要 OPEN
+## 19. `TCP 269` subtype 7：Server→Client player/result hydration
+
+### 19.1 進入點與 Header
+
+`269 → sub_574B20()`；先讀：
+
+```text
+u8 subtype
+```
+
+`subtype == 7` 是大型 player/channel/game-state synchronization branch。[C]
+
+Header 依序：
+
+```text
+u32 v395
+u32 n0x1770
+u8  v370
+u8  jj_1
+u8  v431
+u8  v358
+u16 v374
+u8  thisa_1
+u8  v343
+u16 v371
+u8  v388
+u8  v437
+u16 v432
+u8  v347
+u8  v364
+u8  v378
+u8  v382
+u8  v392
+u8  v360
+u8  v439
+```
+
+helper width 直接閉合：
+
+```text
+sub_592AC0     → 4 bytes
+sub_592940/900 → 1 byte
+sub_592A00     → 2 bytes
+```
+
+目前重要 state application：
+
+```text
+v395    → dword_F2A65C
+n0x1770 → sub_537670(...)
+v431    → sub_537690 / channel lookup
+v388    → channel flags bit tests
+v358    → channel +129
+v370    → sub_540280(channel,...)
+thisa_1 → sub_53FBB0(channel,...)
+v371    → channel +144
+v343    → channel +136
+v432    → channel +148
+v437    → channel +146
+v374    → channel +110
+v347    → channel +150
+v364    → child +12
+v378    → channel +185
+v382    → channel +109
+v392    → child +13
+v360    → channel +128
+v439    → child callback/state
+```
+
+因此 subtype 7 header 本身會修改 channel/game state，不只是 player count。[C]
+
+### 19.2 Repeated player record 與 identity
+
+```text
+for (jj = 0; jj < jj_1; ++jj)
+```
+
+因此 `jj_1` 是 player record count。[C]
+
+每筆前綴：
+
+```text
+u32 v407[0]
+u8  n16_3
+string/blob v399
+u8  v381
+u8  v427
+u32 v433
+u32 v383
+u32 v389[?]
+u8  v413
+u8  v344
+```
+
+`v399` 使用 `sub_592730()`，所以為 variable/string-like data。[C]
+
+直接 state flow：
+
+```text
+v407[0] → dword_F3312C[slot]
+v381   → sub_548940(playerState,&v399,v381)
+v427   → sub_548B00(playerState,v427)
+
+n16_3  → dword_F6DCF4[slot]
+v433   → dword_F6DCF8[slot]
+v383   → dword_F6DCFC[slot]
+v413   → byte_F6DD00[slot]
+v344   → byte_F6DD11[slot]
+```
+
+`n16_3` 是 server-provided player/actor identity candidate；不要直接命名為 SQL user id、session id 或 slot id。[C][OPEN]
+
+### 19.3 K/D 結果同步
+
+同一筆 record 直接：
+
+```text
+F6DCF8[60195 * slot] = v433
+F6DCFC[60195 * slot] = v383
+```
+
+Result UI：
+
+```text
+TEAM_RESULT_B_TEXT_KILL  → F6DCF8
+TEAM_RESULT_B_TEXT_DEATH → F6DCFC
+```
+
+`sub_759030()` 亦用這兩個值進行 result ranking。[C]
+
+此章節的 K/D layer 已在「Score／K-D 三層模型」統一定義，不在此建立第二份結論；本節只保存 `269` 的 producer/field evidence。
+
+### 19.4 Conditional spawn／state block
+
+當：
+
+```text
+v413 == 0
+```
+
+再讀：
+
+```text
+u32 v396
+u16 v390
+u16 v348
+u16 v429
+u16 v425
+u8  v384
+```
+
+寫入：
+
+```text
+dword_F6DD04
+word_F6DD08
+word_F6DD0A
+word_F6DD0C
+word_F6DD0E
+byte_F6DD10
+```
+
+這是實際 conditional wire block，不是 padding。[C]
+
+### 19.5 Local-player detection
+
+Client 以 `sub_537740(byte_EE8968)` 與 player record 中 string/blob 比較；符合時：
+
+```text
+byte_F6DD11[slot] = 1
+byte_F6DD60[slot] = 1
+byte_F6D9EF[slot] = 1
+```
+
+並更新 local network identity / mode state。因此 `v399` 並非純 UI name。[C]
+
+### 19.6 Additional per-player state
+
+每筆 record 還讀：
+
+```text
+u8  v414
+u16 v359
+u16 v366
+u16 v434
+u32 v438
+u32 v375
+u32 n0xA_3
+string Source_1
+```
+
+並：
+
+```text
+v414 → n64[slot]
+v359 → word_F6DD14[slot]
+v366 → n46[slot]
+v434 → n445[slot]
+v438 → sub_548A90()
+v375 → sub_548A40()
+n0xA_3 + Source_1 → sub_54A740() emblem/texture state
+```
+
+public semantic 仍 `[OPEN]`，但 width／state destination 已閉合。[C]
+
+### 19.7 四組 Weapon／Action Resource blocks
+
+每筆 player record 還包含 4 組 weapon/action group。
+
+每組至少：
+
+```text
+u16 itemId
+```
+
+若 `kk != 3`：
+
+```text
+u16 subValue0
+u16 subValue1
+u16 subValue2
+```
+
+若 `itemId != 0`：
+
+```text
+8 × u32
+```
+
+並經：
+
+```text
+sub_5F5400(resourceTable,itemId)
+sub_5F5400(resourceTable,subValue0)
+```
+
+若 Resource category 為 `10 / 14 / 15`，會設定狀態並觸發：
+
+```text
+sub_9B8D40(player)
+```
+
+因此這些 blocks 是 player weapon/action/resource state，不是普通 Inventory snapshot。[C]
+
+### 19.8 Optional 8×u32 state block
+
+之後讀：
+
+```text
+u8 v368
+```
+
+若非零：
+
+```text
+u32 v327[0..7]
+```
+
+目的與 mode/player-specific state 有關，保持 raw。[C][OPEN]
+
+### 19.9 Mode-dependent tail
+
+common player record 後依 active mode object/vtable 分支，例如：
+
+```text
+mode 12 → additional u8/state path
+mode 13 → player/slot state，可能填 dword_F6DDA8[slot]
+mode 11 → sub_760BA0(child, packet)
+others  → u32/u8/u8/u32，可能再讀 16-slot timing/state array
+```
+
+不能併入固定 common record schema，因 parser shape 隨 mode 改變。[C]
+
+### 19.10 Global tail 與 16-player sync
+
+player records 後讀：
+
+```text
+u8  v373
+u8  v424
+u8  v379
+u8  v385
+u8  v356
+u8  v394
+u8  v440
+u32 n0x3E8
+u8  v410
+```
+
+再讀：
+
+```text
+u8  v386
+u32 v361
+u16 v357
+u16 v412
+u8  v426
+```
+
+最後重複 16 次：
+
+```text
+u32 v387
+    → dword_F6DD1C[slot]
+```
+
+目前以 `PerPlayerSyncDword` 暫名；它與其它 gameplay/result path 有直接依賴，但正式 public semantic `[OPEN]`。[C][OPEN]
+
+### 19.11 Timer／state application
+
+Header `n0x1770` 與 common tail `n0x3E8` 會進 timer/state helper，例如：
+
+```text
+sub_7180C0(...)
+```
+
+不同 mode/path 對 `n0x1770` 可出現 `-6000` / `-7000` 類調整。[C]
+
+這證明 Server packet 提供 timing/state integer，但不能僅由數值命名成可見比賽倒數。[C][OPEN]
+
+### 19.12 `269 subtype 7` 完整資料流
+
+```text
+269
+ ↓
+sub_574B20
+ ↓ subtype 7
+global/channel header
+ ↓
+player count
+ ↓
+player identity / name-like data
+ ↓
+result K/D + flags
+ ↓
+conditional spawn/state
+ ↓
+weapon/action/resource blocks
+ ↓
+optional 8×u32 state
+ ↓
+mode-specific tail
+ ↓
+global + 16-player sync tail
+```
+
+因此適合的 Server abstraction 是：
+
+```text
+ServerPlayerStateHydration
+```
+
+而不是把整包硬壓成 `PlayerResultPacket`。
+
+## 20. Result／269 Server reconstruction
+
+跨 packet 的 Server data model 應維持：
+
+```text
+PlayerRecord
+├─ Identity
+├─ Win/Lose records
+├─ ResultKill / ResultDeath
+├─ LiveRoundKill / LiveRoundDeath
+├─ SpecialShotRecords
+├─ ConsecutiveKillRecords
+├─ Weapon/Action/ResourceState
+├─ ModeSpecificState
+└─ UnknownSecondaryValues
+```
+
+其中：
+
+```text
+269 subtype 7
+    → Server-provided result/player hydration
+
+166 subtype 2/16
+    → live gameplay participant event
+
+223–245 / 381–389
+    → result/stat event family
+
+994 / 353 / 309 / football events
+    → specialized event family
+```
+
+不同 packet 可以共同修改同一 PlayerRecord，但不能因此把它們的 wire schema 合併成同一 packet。
+
+## 21. Resource／Wiki／Client 三方定位
+
+```text
+IDA C / LST
+    → wire width、packet parser、caller/callee、state mutation、Quest control flow
+
+Extracted
+    → Quest/resource IDs、UI/localization、concrete data records
+
+日本 PaperMan Wiki
+    → 玩家可見的 Quest、Assist、Kill/Score 與模式行為
+```
+
+任何 public label 都應優先走：
+
+```text
+Client state / condition ID
+    → Extracted data
+    → localization/resource label
+    → Client consumer
+    → Wiki behavior
+```
+
+而不是用 packet number、Hex-Rays 變數名稱或函式 caller 名稱直接反推。
+
+## 22. 重要 OPEN
 
 ```text
 EE8D38 / EE8D3C 正式語意
 EE8DAC 正式用途
 223 實際時間單位與 producer
-237/239/241/243/245 與 381–389 的第二個 u32 語意
-Quest 1–10、18–36 的 public resource label
-225/227/233/235 的完整 request/send counterpart
-381–389 的 Server sender 與完整 result generation
+237/239/241/243/245 與 381–389 第二個 u32 語意
+Quest 1–10、18–36 public resource label
+225/227/233/235 request/send counterpart
+381–389 Server sender 與完整 result generation
 F33184 writer/source
 +60150 真正 gameplay/result writer
-994 / 353 / 309 / 35 與 Quest condition 的完整對應
+994 / 353 / 309 / football event 與 Quest condition 完整對應
+269 header 各欄位正式語意
+269 n16_3 具體 ID namespace
+269 player flags/state formal names
+269 weapon/action 每個 field semantics
+269 optional 8×u32 用途
+269 mode-specific tail 完整 wire schema
+269 dword_F6DD1C formal semantic
+269 Server sender / upstream state source
 ```
 
 所有未知值保持 raw／`[OPEN]`，不得因 Server 實作方便而填入猜測值。
