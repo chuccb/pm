@@ -57,7 +57,6 @@
 | [Core/Mode_Rules.md](Core/Mode_Rules.md) | 各遊戲模式的規則與狀態 |
 | [Core/Mode_Option_Tables.md](Core/Mode_Option_Tables.md) | 模式選項與欄位對照表 |
 | [Core/Gameplay_166_DeepEvidence.md](Core/Gameplay_166_DeepEvidence.md) | `166` 完整 Gameplay、死亡、K/D、欄位與跨函式證據 |
-| [Core/Gameplay_Network_Events.md](Core/Gameplay_Network_Events.md) | Gameplay network event 與事件鏈 |
 
 ## 六、戰鬥、移動與武器
 
@@ -125,6 +124,12 @@ Quest_Result_Packets_223_245.md
     → Result_Stat_Protocol_223_245_381_389.md
 
 Score_State.md
+    → Result_Stat_Protocol_223_245_381_389.md
+
+Gameplay_Network_Events.md
+    → Gameplay_166_DeepEvidence.md
+    → Y_TCP_INF_Damage.md
+    → UDP_Move_Inf_DeepEvidence.md
     → Result_Stat_Protocol_223_245_381_389.md
 ```
 
