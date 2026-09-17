@@ -87,8 +87,7 @@ Extracted 資源
 
 - [`Mode_Rules.md`](Mode_Rules.md)：各遊戲模式的規則與狀態。
 - [`Mode_Option_Tables.md`](Mode_Option_Tables.md)：模式選項與欄位對照表。
-- [`Gameplay_Network_Events.md`](Gameplay_Network_Events.md)：Gameplay network event 與事件鏈。
-- [`Gameplay_166_DeepEvidence.md`](Gameplay_166_DeepEvidence.md)：`166` Gameplay、死亡、K/D、結果與相關深入證據。
+- [`Gameplay_166_DeepEvidence.md`](Gameplay_166_DeepEvidence.md)：`166` Gameplay、死亡、K/D、結果、欄位與跨函式證據。
 
 ### 戰鬥、移動、武器與 Y_TCP_INF
 
@@ -100,7 +99,7 @@ Extracted 資源
 
 ### Packet、Result、Score 與 Quest
 
-- [`Packet_166_Field_Map.md`](Packet_166_Field_Map.md)：`166` 欄位總表與位置對照；完整證據回到 `Gameplay_166_DeepEvidence.md`。
+- [`Packet_166_Field_Map.md`](Packet_166_Field_Map.md)：`166` 欄位速查；完整證據回到 `Gameplay_166_DeepEvidence.md`。
 - [`TCP_269_Subtype7_Field_Detail.md`](TCP_269_Subtype7_Field_Detail.md)：`269 subtype 7` 完整欄位、玩家同步與 Result/K/D 狀態。
 - [`Result_Stat_Protocol_223_245_381_389.md`](Result_Stat_Protocol_223_245_381_389.md)：`223–245`、`381–389` Result／Stat／Quest 主文件。
 
