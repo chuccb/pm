@@ -1,30 +1,29 @@
-# PaperMan 2016 JP — TCP 269 Subtype 7 Field Detail
+# `TCP 269` subtype 7 玩家狀態同步與欄位深入研究
 
-> 研究日期：2026-09-17  
-> Target：PaperMan 日本版 2016 結束營運時最終版 Client
-> Evidence：IDA `PaperMan.exe.c` exact reader sequence + player-state writes + mode/UI cross-reference
+> 研究目標：日本版 PaperMan 2016 年服務終了時的最終 Client。
+> 更新基準：2026-09-17。
+>
+> 本文件現在同時承擔原本 `TCP_269_Subtype7_Field_Detail.md` 與 `TCP_269_Subtype7_Result_State.md` 的內容：前者負責完整 parser／欄位，後者的 K/D、Result state 與 Server→Client hydration 證據已整合至本文件，不再維護第二份平行結論。
 
-## 1. Event entry
+## 1. 封包進入點
 
-TCP dispatcher:
+TCP dispatcher：
 
 ```text
 269 → sub_574B20()
 ```
 
-`sub_574B20()` first consumes:
+`sub_574B20()` 先讀取：
 
 ```text
 u8 subtype
 ```
 
-Subtype 7 is the large match/channel player-state synchronization form.
+其中 subtype 7 是大型 match/channel/player-state synchronization branch。[C]
 
----
+## 2. subtype 7 Header 欄位
 
-## 2. Subtype-7 header fields
-
-Before the repeated player list, the Client consumes:
+開頭依序讀取：
 
 ```text
 u32 v395
@@ -49,81 +48,76 @@ u8  v360
 u8  v439
 ```
 
-The first part is read with:
+其中：
 
 ```text
-sub_592AC0 = 4 bytes
-sub_592940/sub_592900 = 1 byte
-sub_592A00 = 2 bytes
+sub_592AC0     → 4 bytes
+sub_592940/900 → 1 byte
+sub_592A00     → 2 bytes
 ```
 
-Thus field widths above are directly verified from the helper implementations.
+因此上述 width 是由實際 helper 讀取寬度直接確認，而不是由 Hex-Rays 表面型別猜出來。[C]
 
-## 2.1 Header state application
+### 2.1 Header State Application
 
-Direct writes/consumers include:
+目前已看到：
 
 ```text
-v395   → dword_F2A65C
-n0x1770 → sub_537670(byte_EE8968,...)
-v431  → sub_537690 / channel lookup
-v388  → channel flags via bit tests
-v358  → channel +129
-v370  → sub_540280(channel,...)
+v395    → dword_F2A65C
+n0x1770 → sub_537670(...)
+v431    → sub_537690 / channel lookup
+v388    → channel flags bit tests
+v358    → channel +129
+v370    → sub_540280(channel,...)
 thisa_1 → sub_53FBB0(channel,...)
-v371  → channel +144
-v343  → channel +136
-v432  → channel +148
-v437  → channel +146
-v374  → channel +110
-v347  → channel +150
-v364  → child +12 when child exists
-v378  → channel +185
-v382  → channel +109
-v392  → child +13
-v360  → channel +128
-v439  → child callback/state
+v371    → channel +144
+v343    → channel +136
+v432    → channel +148
+v437    → channel +146
+v374    → channel +110
+v347    → channel +150
+v364    → child +12
+v378    → channel +185
+v382    → channel +109
+v392    → child +13
+v360    → channel +128
+v439    → child callback/state
 ```
 
-Then:
+之後設定 channel/game state 並把 16 個 player state block 清理，再進入 repeated player list。[C]
 
-```text
-n15 = 12
-sub_73C360(dword_1D37560)
-```
+因此 subtype 7 顯然不是只有「玩家數量 + 玩家資料」的簡單列表；Header 本身也會修改 channel/gameplay state。[C]
 
-and all 16 player state blocks are reset with `sub_548530()` before reading the repeated list.
+## 3. `jj_1` 是玩家記錄數量
 
-The header is therefore not a simple room/player count packet; it changes channel/gameplay state and then rehydrates the participant list.
-
----
-
-## 3. Repeated player-record prefix
-
-The packet then loops:
+後續直接：
 
 ```c
 for (jj = 0; jj < jj_1; ++jj)
 ```
 
-For each record the exact initial read sequence is:
+因此 `jj_1` 是 repeated player record 的 count／iteration upper bound。[C]
+
+## 4. Repeated Player Record：前綴
+
+每筆記錄開始讀取：
 
 ```text
 u32 v407[0]
 u8  n16_3
-string/blob v399      // sub_592730 destination
+string/blob v399
 u8  v381
 u8  v427
 u32 v433
 u32 v383
-u32 v389[?] / state array entry
+u32 v389[?]
 u8  v413
 u8  v344
 ```
 
-The exact string/blob size is controlled by `sub_592730()` and should not be replaced with a guessed fixed byte length.
+`v399` 由 `sub_592730()` 讀取，因此它是變長字串／資料塊；後續欄位不能用「固定總長 offset」取代。[C]
 
-### 3.1 Immediate player-state writes
+資料流立即把欄位寫入 player state：
 
 ```text
 v407[0] → dword_F3312C[slot]
@@ -137,65 +131,141 @@ v413   → byte_F6DD00[slot]
 v344   → byte_F6DD11[slot]
 ```
 
-The player identity mapping is:
+## 5. Player Identity
+
+`n16_3` 直接寫入：
 
 ```text
-n16_3
-  → dword_F6DCF4[60195*slot]
+dword_F6DCF4[60195 * slot]
 ```
 
-and the player's name/blob is separately retained in the player-state object.
+因此它是 Server 提供、與 slot 綁定的 player/actor identity。[C]
 
----
+目前仍不要把它直接改名成某一種 SQL user id、session id 或 slot id；只能說它是 server-provided compact player identity，其 local mapping 仍需由其他資料流確認。[C][OPEN]
 
-## 4. `F6DCF4/F6DCF8/F6DCFC` semantic boundary
+## 6. Server-Provided Result／K/D State
 
-`F6DCF4` stores the server-provided compact player ID.
-
-`F6DCF8` and `F6DCFC` are both server-provided DWORDs from the 269 subtype-7 record.
-
-They are consumed by `sub_759030()`:
+同一筆 repeated record 直接做：
 
 ```text
-F6DCF8 = primary ranking key
-F6DCFC = secondary ranking key
-F33184 = tertiary tie-break key
+dword_F6DCF8[60195 * slot] = v433
+dword_F6DCFC[60195 * slot] = v383
 ```
 
-The same mode's `RoundStat` UI can directly render:
+這是非常重要的 authority 證據：K/D 結果狀態至少有一條明確的 Server→Client hydration path，並非全部由本地 gameplay event 即時計算。[C]
+
+### 6.1 Result UI Cross-check
+
+完整結果呈現路徑使用：
 
 ```text
-F6DCF8[slot]
+TEAM_RESULT_B_TEXT_KILL
+    → dword_F6DCF8[60195 * slot]
+
+TEAM_RESULT_B_TEXT_DEATH
+    → dword_F6DCFC[60195 * slot]
 ```
 
-or, under another display branch, the locally computed:
+此外 `sub_759030()` 會使用 `F6DCF8` 作排序 key，`F6DCFC` 作第二排序 key，進一步證明它們是正式 result/stat state，而非 transient rendering value。[C]
+
+因此目前可記為：
 
 ```text
-player +240600
+F6DCF8 = team/result Kill value
+F6DCFC = team/result Death value
 ```
 
-Therefore the safest semantic is:
+這是直接 Client code + UI cross-reference 的高信度語意。[C][X]
+
+## 7. 與 `166 subtype 2/16` 的結果層級區分
+
+`166` 的 `sub_7463E0()` 另外修改：
 
 ```text
-F6DCF8 = server-provided primary round/ranking/stat value
-F6DCFC = server-provided secondary round/ranking/stat value
++240600
++240604
 ```
 
-They should not be renamed to Kill/Death solely from the sort function.
+在 normal `a4 == 0` 路徑：
 
-Importantly, this also proves they are **not generated by TCP 166's +240600/+240604 increments**; they arrive through 269 subtype 7.
+```text
+participant A → +240600 Kill++
+participant B → +240604 Death++
+```
 
----
+因此：
 
-## 5. Conditional 13-byte spawn/state block
+```text
+166 subtype 2/16
+    = 即時 gameplay event / participant state mutation
 
-If:
+269 subtype 7
+    = Server 提供的 player-state hydration / result stat synchronization
+```
+
+兩者都可能與 Kill/Death 有關，但不能假定同一欄位、同一封包或同一 update event。[C]
+
+## 8. `+60150/+60151` 是第三層結果狀態
+
+Result screen local fields：
+
+```text
++60150 → SOLO_RESULT_R_MY_KILL
++60151 → SOLO_RESULT_R_MY_DEATH
+```
+
+目前 exact C evidence 顯示：
+
+```text
++60151
+    → 有直接 death-path write
+
++60150
+    → 目前未找到同等直接 gameplay increment/write
+```
+
+因此 Server reconstruction 必須分成至少三層：
+
+```text
+F6DCF8/F6DCFC
+    = Server-provided per-player team/result Kill/Death
+
++240600/+240604
+    = live round/mode participant Kill/Death
+
++60150/+60151
+    = local player result-screen My Kill/Death
+```
+
+它們的數值可能互相相關，但不可僅因 UI label 相似就合併。[C]
+
+## 9. Negative Evidence：不要假設 `+60150` 一定由 166 直接遞增
+
+對完整 `PaperMan.exe.c` 搜尋 `60150`，目前主要找到 result/UI read，例如：
+
+```c
+v93 = *(v94 + 60150);
+```
+
+送入 `SOLO_RESULT_R_MY_KILL`。[C]
+
+相較之下 `+60151` 可以找到更直接的 death-path write。因此目前不能建立：
+
+```text
+166 kill event → ++60150
+```
+
+作為已證實規則。[C][OPEN]
+
+## 10. Conditional 13-byte Spawn／State Block
+
+若：
 
 ```text
 v413 == 0
 ```
 
-then an additional block is read:
+則再讀取：
 
 ```text
 u32 v396
@@ -206,30 +276,22 @@ u16 v425
 u8  v384
 ```
 
-and stored to:
+並寫入：
 
 ```text
-player + dword_F6DD04
-player + word_F6DD08
-player + word_F6DD0A
-player + word_F6DD0C
-player + word_F6DD0E
-player + byte_F6DD10
+dword_F6DD04
+word_F6DD08
+word_F6DD0A
+word_F6DD0C
+word_F6DD0E
+byte_F6DD10
 ```
 
-This is a real conditional wire block, not padding.
+這是實際 conditional wire block，不是 padding。[C]
 
----
+## 11. Local-player Detection
 
-## 6. Local-player detection
-
-The player record's string/blob is compared against:
-
-```text
-sub_537740(byte_EE8968)
-```
-
-If equal, the Client marks this slot as local:
+Client 會以 `sub_537740(byte_EE8968)` 與 player record 中的 string/blob 比較。符合時，會設定：
 
 ```text
 byte_F6DD11[slot] = 1
@@ -237,23 +299,13 @@ byte_F6DD60[slot] = 1
 byte_F6D9EF[slot] = 1
 ```
 
-and updates local network identity/mode state through:
+並更新 local network identity / mode state。[C]
 
-```text
-sub_5375F0
-sub_537610
-sub_537630
-sub_537710
-sub_5487F0
-```
+因此 `v399` 並非純 UI 名稱；它參與 local-player identity 判定。[C]
 
-Therefore the name/blob field is operationally important; it is not merely scoreboard text.
+## 12. Additional Per-player State
 
----
-
-## 7. Additional per-player state after the prefix
-
-Every record then consumes:
+後續每筆 record 還會讀：
 
 ```text
 u8  v414
@@ -263,38 +315,34 @@ u16 v434
 u32 v438
 u32 v375
 u32 n0xA_3
-string Source_1 (sub_592730)
+string Source_1
 ```
 
-Writes include:
+並寫入／呼叫：
 
 ```text
 v414 → n64[slot]
 v359 → word_F6DD14[slot]
 v366 → n46[slot]
 v434 → n445[slot]
-
-v438 → sub_548A90(playerState,...)
-v375 → sub_548A40(playerState,...)
-
-n0xA_3 + Source_1 → emblem/texture object via sub_54A740
+v438 → sub_548A90()
+v375 → sub_548A40()
+n0xA_3 + Source_1 → sub_54A740() emblem/texture state
 ```
 
-The exact semantic of the three u16 values remains unresolved, but their widths and player-state destinations are direct.
+這些欄位的精確公開語意仍 `[OPEN]`，但其 width 與 state destination 是直接證據。[C]
 
----
+## 13. 四組 Weapon／Action Resource Blocks
 
-## 8. Four weapon/action blocks
+每筆 player record 之後還包含 4 組 weapon/action group。
 
-Each player record then contains **4** weapon/action groups.
-
-For each group:
+每組至少：
 
 ```text
 u16 itemId
 ```
 
-For `kk != 3` there are three more `u16` values:
+若 `kk != 3`，再讀三個 u16：
 
 ```text
 u16 subValue0
@@ -302,89 +350,70 @@ u16 subValue1
 u16 subValue2
 ```
 
-If `itemId != 0`, exactly:
+若 `itemId != 0`，再讀：
 
 ```text
 8 × u32
 ```
 
-are consumed and stored.
-
-The Client stores them in two parallel per-player structures and also resolves:
+並解析 Resource：
 
 ```text
 sub_5F5400(resourceTable,itemId)
 sub_5F5400(resourceTable,subValue0)
 ```
 
-If either Resource has category:
-
-```text
-10 / 14 / 15
-```
-
-it sets a flag causing:
+若 Resource category 為 `10 / 14 / 15`，會設定狀態，之後觸發：
 
 ```text
 sub_9B8D40(player)
 ```
 
-after the four weapon groups.
+因此這些 blocks 是實際 player weapon/action/resource state，不是普通 Inventory snapshot。[C]
 
-Therefore these blocks are actual weapon/action/resource state, not generic inventory snapshots.
+不要把這四組直接與其它 action/resource manager 的不同物件 layout 壓平。[C]
 
-### 8.1 Important topology
+## 14. Optional 8×u32 State Block
 
-The four records are distinct from the previously identified 6-group action/resource manager used elsewhere. Do not collapse these structures without object-layout proof.
-
----
-
-## 9. Optional 8×u32 state block
-
-After the weapon groups:
+之後讀：
 
 ```text
 u8 v368
 ```
 
-If nonzero:
+若非零，則再讀 8 個 u32：
 
 ```text
-8 × u32 v327[0..7]
+v327[0..7]
 ```
 
-are consumed.
+其目的與 mode/player-specific state 有關，目前保持 raw 形式。[C][OPEN]
 
-The destination is a mode/player-specific structure. This is another conditional block and should be preserved exactly in any protocol implementation.
+## 15. Mode-dependent Tail
 
----
-
-## 10. Mode-dependent tail
-
-After the common player record, subtype-7 processing branches on a mode ID obtained from the active channel child:
+Common player record 後可能依 active mode object/vtable 分支：
 
 ```text
 mode 12
-    → one u8 / additional state path
+    → additional u8/state path
 
 mode 13
-    → player/slot-dependent operations
-    → v407[1..16] values can populate dword_F6DDA8[slot]
+    → player/slot-dependent state
+    → 可能填入 dword_F6DDA8[slot]
 
 mode 11
     → sub_760BA0(child, packet)
 
-mode 12 (later state path)
-    → u32/u8/u8/u32 + possible 16-slot timing/state array
+其他 mode-specific path
+    → u32/u8/u8/u32
+    → 可能再讀 16-slot timing/state array
 ```
 
-These tails are not safe to merge into the common player record because their parser shapes depend on the active mode object/vtable.
+這些 tails 不可併入固定的 common record schema，因為 parser shape 隨 mode 改變。[C]
 
----
+## 16. Common Global Tail 與 16-player Sync State
 
-## 11. Global 16-player timing/state values
-
-After the repeated records, the common tail reads:
+repeated player records 完成後，還會讀取：
 
 ```text
 u8  v373
@@ -398,7 +427,7 @@ u32 n0x3E8
 u8  v410
 ```
 
-Then:
+再讀：
 
 ```text
 u8  v386
@@ -408,85 +437,97 @@ u16 v412
 u8  v426
 ```
 
-and then:
+最後重複 16 次：
 
 ```text
-repeat 16 times:
-    u32 v387
+u32 v387
     → dword_F6DD1C[slot]
 ```
 
-The 16 repeated DWORDs are explicitly attached to each player slot and later used by the 166 damage/event path. Their exact semantic remains unresolved; retaining them as `PerPlayerSyncDword` is appropriate.
+這組 16 個 DWORD 與 player slot 直接綁定，並會被其它 gameplay/result path 使用；公開語意尚未完全閉合，因此採 `PerPlayerSyncDword` 暫名。[C][OPEN]
 
----
+## 17. Timer／State Application
 
-## 12. Timer/state application
-
-Common header `n0x1770` and `n0x3E8` feed:
+Header 中的 `n0x1770` 與 common tail 的 `n0x3E8` 會進入 timer/state helper，例如：
 
 ```text
 sub_7180C0(...)
 ```
 
-with mode-dependent adjustment:
+不同 mode/path 可能對 `n0x1770` 進行 `-6000` 或 `-7000` 類調整。[C]
+
+這直接證明 Server packet 提供 timing/state 整數，但尚不能僅由這個值命名成「可見比賽倒數時間」。[OPEN]
+
+## 18. subtype 7 的整體語意
+
+目前最合理的 server-side abstraction 是：
 
 ```text
-normal: n0x1770
-one branch: n0x1770 - 6000
-special branch: n0x1770 - 7000
+269 subtype 7
+    = server-provided player/channel/game state hydration
+      + per-player result/stat state
+      + equipment/resource state
+      + mode-specific state
+      + global/per-player timing state
 ```
 
-This proves the server supplies a timing/state integer consumed by Client timer machinery. It does not by itself prove that the wire value is the visible match timer.
-
----
-
-## 13. What 269 subtype 7 proves about server authority
-
-The following state is directly populated from the server packet:
+這與：
 
 ```text
-player ID
-player name/blob
-ranking/stat DWORDs
-player state flags
-weapon/action/resource IDs
-weapon property arrays
-emblem
-mode-dependent state
-per-player sync DWORD
+166
+    = realtime gameplay event family
+
+UDP 8/24
+    = realtime movement/state synchronization family
 ```
 
-This is a broad authoritative hydration/synchronization record.
+應保持不同層級。[C]
 
-It should not be confused with:
+## 19. 目前已閉合的結論
 
 ```text
-166 = realtime gameplay event/state notifications
-UDP 8/24 = realtime movement/state records
+269 subtype 7
+    → 先解析 global/channel header
+    → jj_1 決定 player record 數量
+    → 逐 player hydration
+    → 條件式 spawn/state block
+    → weapon/action/resource blocks
+    → optional 8×u32 block
+    → mode-specific tail
+    → global + 16-player sync tail
+
+n16_3
+    = server-provided player identity candidate
+
+v433 → F6DCF8
+    = team/result Kill value
+
+v383 → F6DCFC
+    = team/result Death value
+
++240600/+240604
+    = 與 166 live participant event 分開的 round-local state
+
++60150/+60151
+    = local result-screen My K/D，第三層
 ```
 
-The correct server reconstruction therefore needs a distinct `SyncPlayerState` record for 269 subtype 7.
-
----
-
-## 14. Remaining exact proofs
+## 20. 尚未閉合的項目
 
 ```text
-v407[0] semantic
-v433/F6DCF8 exact public stat label
-v383/F6DCFC exact public stat label
-v381/v427 player flags
-v414/v359/v366/v434 meanings
-v438/v375 meanings
-n0xA_3 / Source_1 exact emblem metadata
-four weapon-block sub-u16 meanings
-8×u32 weapon properties
-v368 + optional 8×u32 block
-mode-specific tails
-v373/v424/v379/v385/v356/v394/v440/n0x3E8/v410
-v386/v361/v357/v412/v426
-16×dword_F6DD1C semantic
-outer header/sequence/checksum/encryption
+1. Header 各欄位的官方／公開語意
+2. v407[0] 的正式語意
+3. n16_3 的具體 ID namespace
+4. v381/v427/v414 等 player flags/state 的正式名稱
+5. v359/v366/v434/v438/v375 的公開語意
+6. emblem/texture block 的完整 schema
+7. 四組 weapon/action resource block 的每個 u16/u32 語意
+8. optional 8×u32 block 的用途
+9. 所有 mode-specific tail 的完整 wire schema
+10. 16 × dword_F6DD1C 的正式語意
+11. +60150 的真正 writer/source
+12. 269 subtype 7 的 Server sender 與上游 state source
+13. outer sequence/checksum/encryption/frame details
 ```
 
-No unresolved field is assigned a public name merely from offset order.
+未知欄位保持 `[OPEN]`；不得因為 Server 實作方便而命名成 guessed semantics 或填入固定值。
