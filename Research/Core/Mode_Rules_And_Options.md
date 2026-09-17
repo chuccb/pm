@@ -1,52 +1,39 @@
-# 遊戲模式、勝負規則與 Selector Values 整合研究
+# 遊戲模式、勝負規則、Room Selector 與設定封包整合研究
 
-> 研究目標：日本版 PaperMan 2016 年服務終了時的最終 Client。
+> 目標版本：日本版 PaperMan 2016 年服務終了時的最終 Client。
 > 更新基準：2026-09-17。
-> 文件責任：集中各遊戲模式的玩家可見規則、Client mode builder、selector index/value、版本差異與 Runtime 待閉合項目。Room 通用 wire schema 仍由 Room 相關主文件維護。
+> 文件責任：集中 ModeId、OptionIndex、OptionValue、Room selector、設定封包、模式規則、版本差異與 Runtime 待閉合項目。
 
-## 先看這裡：這份文件回答什麼
+## 1. 一眼看懂
 
-如果問題是「這個模式有哪些規則值、OptionIndex 與 OptionValue 是什麼、模式規則如何映射到 Runtime」，看這份文件。
-
-如果問題是「Room setting packet 怎麼編碼」，看：
+本文件回答兩件彼此相連的事：
 
 ```text
-Room_Settings_Packets.md
-Room_Channel_GameRule_101_192_Field_Evidence.md
-Channel_Lobby_193_221_Field_Evidence.md
+Room UI 怎麼產生 selector value、如何送進 packet
+
+以及
+
+不同 Mode 如何解讀這些 value 成為規則
 ```
 
-如果問題是「遊戲進行中某個事件如何改 state」，看：
+核心資料流：
 
 ```text
-Gameplay_Network.md
-Combat_Damage.md
-UDP_Move_Inf_DeepEvidence.md
-```
-
-最短理解路徑：
-
-```text
-Mode
+Room UI
   ↓
 OptionIndex
   ↓
 OptionValue
   ↓
+Request / ACK
+  ↓
 Room state
   ↓
-CGameRule / ModeRuntime
+Mode / CGameRule
   ↓
-Win / Round / Objective condition
-```
-
-## 1. 核心模型：Mode、OptionIndex、OptionValue 必須分離
-
-Room selector entry 一般為：
-
-```text
-entry stride = 40 bytes
-entry value  = +36
+Rule / Time / Objective
+  ↓
+MatchRuntime
 ```
 
 因此：
@@ -59,260 +46,306 @@ OptionIndex
 OptionValue
 ```
 
-Mode-specific lobby builder 會直接建立 concrete option value，再交給 generic selector；Server reconstruction 不應只保存 UI index，也不能把 selector value 自動當成 mode enum。[C]
+精確 top-level packet bytes 仍由 [`Room_Channel_GameRule_101_221_Field_Evidence.md`](Room_Channel_GameRule_101_221_Field_Evidence.md) 維護；本文件聚焦 selector/value 與其 mode semantics。[C]
 
-## 2. Team Match／チーム戦術モード
+## 2. Selector 的共同資料模型
 
-C：`CyGameModes::CyTeamMatchModeLobbyUI::sub_74F8B0()`。
-
-```text
-Round values:
-3 / 5 / 7 / 10 / 12 / 15
-```
-
-| Index | Display | Value |
-|---:|---|---:|
-| 0 | `3 Round` | 3 |
-| 1 | `5 Round` | 5 |
-| 2 | `7 Round` | 7 |
-| 3 | `10 Round` | 10 |
-| 4 | `12 Round` | 12 |
-| 5 | `15 Round` | 15 |
-
-Wiki 的 `チーム戦術モード` 與 Client values 一致。[C][WIKI][X]
-
-玩家規則層：以 round 為主要勝負單位，依存活人數與相關條件決定 round 結果，再進下一 round。Runtime 尚待完整閉合：
+多個 Room scroll control 使用同一種 entry：
 
 ```text
-alive player count
-round timer
-round win count
-match win threshold
-respawn gate
-draw behavior
+entry stride = 40 bytes
+entry value  = +36
 ```
 
-## 3. Individual Survival／個人サバイバル
+對應 Client：
 
-C：`CyGameModes::CyIndividualSurvivalModeLobbyUI::sub_750220()`。
+```c
+return *(*(this + 33) + 40 * a2 + 36);
+```
+
+因此 Server 必須保留：
 
 ```text
-Kill values:
-20 / 30 / 40 / 50
+OptionIndex  = UI list position
+OptionValue  = actual selected / transmitted value
 ```
 
-| Index | Display | Value |
-|---:|---|---:|
-| 0 | `20 Kill` | 20 |
-| 1 | `30 Kill` | 30 |
-| 2 | `40 Kill` | 40 |
-| 3 | `50 Kill` | 50 |
+不能假設兩者相等。[C]
 
-Wiki 與 Client 完全一致。[C][WIKI][X]
+## 3. Room UI 控制域
 
-玩家規則：時間內依擊殺數判定，達到設定條件可提前結束，時間到則結算；可搭配 Item、Crazy、No Skill 等房間設定。[WIKI]
-
-Runtime 尚待：
+Client Room UI 明確包含：
 
 ```text
-kill counter source
-kill threshold end trigger
-respawn invulnerability
- timeout result path
-reward / quest timing
+GAMEROOM_START
+GAMEROOM_READY
+GAMEROOM_SCROLL_MAP
+GAMEROOM_SCROLL_RULE
+GAMEROOM_SCROLL_OBJECT
+GAMEROOM_SCROLL_TIME
+GAMEROOM_ITEM
+GAMEROOM_GIMMICK
+GAMEROOM_TEAMBALANCE
+GAMEROOM_TEAMSHUFFLE
+GAMEROOM_DAMAGEROOM
+GAMEROOM_USERSLOTS
+GAMEROOM_CLAN_NOSKILL
+GAMEROOM_NORMAL_NOSKILL
+GAMEROOM_CHATMODE
+GAMEROOM_MASTERROOM
+GAMEROOM_LOCALROOM
 ```
 
-## 4. Team Survival／チームサバイバル
+Wiki 的 Room information 亦列出 mode、map、victory condition、time、item/no-item、team balance、team shuffle、local rule、knife、crazy、no-skill 等玩家可見設定。[WIKI]
 
-C：`CyGameModes::CyTeamSurvivalModeLobbyUI::sub_751510()`。
+這些 control 不應被視為單一 global option；不同 control 使用不同 selector 或 flag family。[C][WIKI]
+
+## 4. Selector packet 對照
+
+| Opcode | Packet | Wire | Client destination | 目前語意 |
+|---:|---|---|---|---|
+| 121 | `GR_MAPCHANGE_REQ` | `u8` | Map selector | `map_value` |
+| 122 | `GR_MAPCHANGE_ACK` | `u8` | `GAMEROOM_SCROLL_MAP` | `map_value` |
+| 127 | `GR_READY_REQ` | 0 | Ready path | ready request |
+| 129 | `GR_START_REQ` | `u8` | Start path | map-derived start parameter |
+| 169 | `GR_RULECHANGE_REQ` | `u8` | `GAMEROOM_SCROLL_RULE` | `rule_selector_value` |
+| 170 | `GR_RULECHANGE_ACK` | `u8` | `GAMEROOM_SCROLL_RULE` | `rule_selector_value` |
+| 171 | `GR_WINCHANGE_REQ` | `u16` | `GAMEROOM_SCROLL_OBJECT` | `object_selector_value` |
+| 172 | `GR_WINCHANGE_ACK` | `u16` | `GAMEROOM_SCROLL_OBJECT` | `object_selector_value` |
+| 173 | `GR_TIMECHANGE_REQ` | `u8` | `GAMEROOM_SCROLL_TIME` | `time_selector_value` |
+| 174 | `GR_TIMECHANGE_ACK` | `u8` | `GAMEROOM_SCROLL_TIME` | `time_selector_value` |
+| 175 | `GR_ITEMCHANGE_REQ` | `u8` packed | `GAMEROOM_ITEM` + related state | bit0 Item；bit1 map/gimmick-related candidate |
+| 176 | `GR_ITEMCHANGE_ACK` | `u8` packed | same | same |
+| 177 | `GR_AUTOCHANGE_REQ` | OPEN | OPEN | independent room-state family |
+| 178 | `GR_AUTOCHANGE_ACK` | OPEN | OPEN | independent room-state family |
+
+完整 parser／serializer 實作與其它 101–221 packet 不在本文件重複。[C]
+
+## 5. Map selector：121/122
+
+Request：
 
 ```text
-Kill values:
-50 / 100 / 200
+121 +0x00 u8 map_value
 ```
 
-Wiki 現行規則一致。[C][WIKI][X]
-
-玩家規則：兩隊累計擊殺數比較，達標或時間到後結算。[WIKI]
-
-重要歷史反證：2010-02-07 日本 `ver.Gp` Wiki 記載同名模式曾使用：
+ACK：
 
 ```text
-染料ポイント 1000 / 2000 / 3000cc
-時間 10 / 20 / 30 分
+122 +0x00 u8 map_value
 ```
 
-而目前研究的 Final Client／Wiki 為 Kill-based `50/100/200`。所以：
+`sub_42FC50()` 取得 `GAMEROOM_SCROLL_MAP`，以 `sub_4387B0()` 尋找 `entry value == map_value`，再以 `sub_6B9B10()` 選中 UI item。[C]
+
+Room/player object `+130` 保存：
 
 ```text
-ModeName != immutable RuleSchema
+current_map_selector_value
 ```
 
-Server reconstruction 必須至少區分：
+目前不能僅以此命名 `map_id`。[C]
+
+Resource 證據：
 
 ```text
-ClientBuild / ProtocolRevision
-Mode
-RuleFamily
-RuleValue
+Extracted/map/maplist.dat
+    ↓
+map entry / actual .pmm path
+    ↓
+GAMEROOM_SCROLL_MAP
+    ↓
+selector value
+    ↓
+121/122
 ```
 
-## 5. Pulp & Roll／パルプ＆ロール
+例如 `maps\\TU_01_tutorial.pmm` 可在 map inventory 中找到。[RES]
 
-C：`CyGameModes::CyPulpnRollModeLobbyUI::sub_753000()`。
+因此 Map selector 是目前 Room 設定中最完整的 C／Resource／Wiki 閉環之一。[C][RES][WIKI][X]
+
+## 6. Time selector：173/174
 
 ```text
-Time values:
-15 / 30 / 45
+173 GR_TIMECHANGE_REQ → u8 time_value
+174 GR_TIMECHANGE_ACK → u8 time_value
 ```
 
-| Index | Resource key | Value |
-|---:|---:|---:|
-| 0 | `0x24` | 15 |
-| 1 | `0x2D` | 30 |
-| 2 | `0x395` | 45 |
-
-Wiki 與 15/30/45 分一致。[C][WIKI][X]
-
-玩家規則：奪取 Pulp 並運回指定區域；A/B/C 據點、持有／掉落、攻守輪替、計時與 point 累積等屬 mode-specific state。[WIKI]
-
-Runtime 待閉合：
+ACK 經 `sub_430920()` 對應：
 
 ```text
-pulp object ID
-carrier/drop/pickup
-A/B/C objective state
-phase transition
-point producer
-暴走狀態
-round/match end
+Room/Player object +136 = current_time_selector_value
+GAMEROOM_SCROLL_TIME
 ```
 
-## 6. Steel／スチールモード
+Client 用 selector value 反找 list index 並更新 UI。[C]
 
-C：`CyGameModes::CyStealModeLobbyUI::sub_751D20()`。
+Server 必須分開：
 
 ```text
-Objective values:
-1000 / 2000 / 3000 cc
+TimeOptionIndex
+TimeOptionValue
+Duration
 ```
 
-| Index | Display | Value |
-|---:|---|---:|
-| 0 | `1000 cc` | 1000 |
-| 1 | `2000 cc` | 2000 |
-| 2 | `3000 cc` | 3000 |
+即使 Wiki 顯示 `10/20/30 分` 等玩家可見數值，也不能直接把 packet byte 當分鐘數；wire value 與 display duration 不是同一層。[WIKI][OPEN]
 
-這再次證明 `GR_WINCHANGE` 之類名稱不能被直接解讀成 global kill limit。[C]
-
-Wiki 對 Steel 的具體 objective 行為仍需與 Client runtime 持續閉合。[WIKI][OPEN]
-
-## 7. Occupy Renewal／new占領モード
-
-C：`CyGameModes::CyOccupyRenewalModeLobbyUI::sub_755420()`。
+## 7. Rule selector：169/170
 
 ```text
-Point values:
-300 / 500 / 700 / 1000
+169 GR_RULECHANGE_REQ → u8 rule_value
+170 GR_RULECHANGE_ACK → u8 rule_value
 ```
 
-Wiki 同樣列出這四個 Point value。[C][WIKI][X]
-
-Resource label keys：
+ACK：
 
 ```text
-0x53B / 0x53C / 0x53D / 0x53E
+sub_42FE50()
+    ↓
+sub_426930(...)
+    ↓
+Room/Player object +130
+    ↓
+GAMEROOM_SCROLL_RULE
+    ↓
+entry value match
+    ↓
+UI selection
 ```
 
-目前 resource-backed 已確認，但 key → 原始日文 literal 仍 OPEN。[C][RES][OPEN]
+`GAMEROOM_USERSLOTS` 等 Room state 也可能在同一路徑更新。[C]
 
-## 8. Occupy／占領
+Client 內部也存在 value → index 的反向查找，因此不能丟掉 Index/Value 的區分。[C]
 
-C：`CyGameModes::CyOccupyModeLobbyUI::sub_753BA0()`。
+## 8. Object selector：171/172
+
+Registration：
 
 ```text
-Round values:
-1 / 2 / 3
+171 GR_WINCHANGE_REQ
+172 GR_WINCHANGE_ACK
 ```
 
-這與 Team Match 的 `3/5/7/10/12/15` 是不同 option family；不能建立 global round enum 並視為相同條件。[C]
-
-## 9. Practice／練習モード
-
-C：`CyGameModes::CyPracticeModeLobbyUI::sub_752540()`。
+wire：
 
 ```text
-999 Kill
+u16
 ```
 
-Tutorial mode 同樣存在 `999 Kill` option。
-
-Wiki 明確說 Practice 的 `999 kill` 不會依一般 Kill target 正常結束，因此 Server 不應只有：
+`sub_430720()` 明確操作：
 
 ```text
-if Kill >= RuleValue:
-    MatchEnd()
+GAMEROOM_SCROLL_OBJECT
+Room/Player object +144
 ```
 
-而要交給 mode-specific `IsMatchOver()` policy。[C][WIKI]
-
-## 10. Soccer／サッカーモード
-
-Client `CyTeamSoccerModeLobbyUI` 明確分成兩套 option builder。
-
-### 10.1 Time
-
-`sub_754750()`：
+因此目前安全語意是：
 
 ```text
-7 / 10 / 15 / 20
+171/172 = 16-bit Object selector value
 ```
 
-Resource keys：
+不能因 packet name `WINCHANGE` 就直接命名 `kill_limit`、`round_limit` 或 `win_type`。[C]
+
+Wiki 的 mode-specific values（Kill／Round／Point／CC）是 rule domain 證據；它們與此 16-bit selector value 是否一一對應，仍需 caller + resource + mode builder 閉合。[WIKI][OPEN]
+
+## 9. Item packed flags：175/176
+
+Request：
 
 ```text
-0x4C6 / 0x21 / 0x24 / 0x28
+175 +0x00 u8 packed_flags
 ```
 
-Wiki 同樣為 7/10/15/20 分。[C][WIKI][X]
-
-### 10.2 Goal
-
-`sub_754B20()`：
+ACK：
 
 ```text
-5 / 7 / 10 / 15
+176 +0x00 u8 packed_flags
 ```
 
-Resource keys：
+建包前：
 
 ```text
-0x4F3 / 0x4F4 / 0x4F5 / 0x4FA
+bit 0 = GAMEROOM_ITEM state
+bit 1 = map-dependent / gimmick-related result candidate
 ```
 
-Runtime/HUD 又直接使用：
+ACK decode：
 
 ```text
-GOAL_POINT_5
-GOAL_POINT_7
-GOAL_POINT_10
-GOAL_POINT_15
+bit 0 → Item on/off
+bit 1 → map-dependent / gimmick-related flag
 ```
 
-Wiki 同樣列出 5/7/10/15 Goal。[C][WIKI][X]
+bit 0 有 Wiki `アイテム/ノーアイテム戦` 與 C path 的獨立吻合。[C][WIKI][X]
 
-因此 Soccer 必須維持：
+bit 1 目前仍不可直接命名 `Crazy`、`Knife` 等。[C][OPEN]
+
+`GAMEROOM_DAMAGEROOM` 有獨立控制 path：
 
 ```text
-TimeOption
-GoalOption
+sub_430FA0 → sub_56F950
+sub_430FD0 → GAMEROOM_DAMAGEROOM +76
 ```
 
-而不是單一 option family。
+因此它不能與 175/176 的 packed item byte 共用 enum。[C]
 
-## 11. Mode factory／Client mode namespace
+## 10. No Skill / Team Balance / Team Shuffle
 
-目前 Client mode factory／lobby class 包含：
+Client 同時存在：
+
+```text
+GAMEROOM_TEAMBALANCE
+GAMEROOM_TEAMSHUFFLE
+GAMEROOM_CLAN_NOSKILL
+GAMEROOM_NORMAL_NOSKILL
+GAMEROOM_USERSLOTS
+```
+
+No Skill 還有 context split：
+
+```text
+current player/object +188 == 2
+    → GAMEROOM_CLAN_NOSKILL
+else
+    → GAMEROOM_NORMAL_NOSKILL
+```
+
+因此 No Skill 至少在 Client UI/state 層不是單一 global boolean。[C][WIKI]
+
+完整 wire opcode/value mapping 尚待對應 sender/receiver 閉合。[OPEN]
+
+## 11. Start selector：129
+
+Start path 在通過 precondition 後：
+
+```text
+sub_437060()
+    ↓
+GAMEROOM_SCROLL_MAP
+    ↓
+entry value
+```
+
+至少在 `n124 == 125` path 中，Client 可能從 map selector list 隨機選擇一個 value，再送入：
+
+```text
+129 GR_START_REQ
+```
+
+因此 129 的 byte 是 map-derived start parameter，而非可直接命名的 generic `start_flag`。[C][OPEN]
+
+## 12. Autochange：177/178
+
+```text
+177 GR_AUTOCHANGE_REQ
+178 GR_AUTOCHANGE_ACK
+```
+
+目前只確認它是獨立 Room-state family；完整 sender → receiver → state/resource chain 尚未閉合。[C][OPEN]
+
+## 13. Mode factory／Client mode namespace
+
+目前 Client mode factory／lobby class：
 
 ```text
 0  CyTeamMatchModeLobbyUI
@@ -332,61 +365,180 @@ GoalOption
 15 CyWeaponTestModeLobbyUI
 ```
 
-這些是 Client mode namespace；不能直接拿來當：
+這是 Client mode namespace，不可直接當成：
 
 ```text
 GR_RULECHANGE value
 GR_TIMECHANGE value
 GR_WINCHANGE value
+CGameRule helper type predicate
 ```
 
-## 12. Room capability 與 mode-specific rules
+## 14. Final Client mode rules
 
-Room UI 可見控制包含：
+### 14.1 Team Match／チーム戦術モード
+
+C：`CyGameModes::CyTeamMatchModeLobbyUI::sub_74F8B0()`。
 
 ```text
-GAMEROOM_SCROLL_MAP
-GAMEROOM_SCROLL_RULE
-GAMEROOM_SCROLL_OBJECT
-GAMEROOM_SCROLL_TIME
-GAMEROOM_ITEM
-GAMEROOM_GIMMICK
-GAMEROOM_TEAMBALANCE
-GAMEROOM_TEAMSHUFFLE
-GAMEROOM_DAMAGEROOM
-GAMEROOM_CLAN_NOSKILL
-GAMEROOM_NORMAL_NOSKILL
+Round values:
+3 / 5 / 7 / 10 / 12 / 15
 ```
 
-某些能力／規則只在特定 mode 有效。例如 Knife Battle、No Skill、Gimmick 等不能當成所有 Room 的 global capability。[WIKI][C][OPEN]
+| Index | Display | Value |
+|---:|---|---:|
+| 0 | `3 Round` | 3 |
+| 1 | `5 Round` | 5 |
+| 2 | `7 Round` | 7 |
+| 3 | `10 Round` | 10 |
+| 4 | `12 Round` | 12 |
+| 5 | `15 Round` | 15 |
 
-## 13. 版本隔離
+Client values 與 Wiki `チーム戦術モード` 一致。[C][WIKI][X]
 
-同名模式在不同 Client build／歷史版本可以使用完全不同的 rule family。因此 Server domain model 建議：
+Runtime 尚待：alive count、round timer、round win count、match threshold、respawn gate、draw behavior。[OPEN]
+
+### 14.2 Individual Survival／個人サバイバル
+
+C：`CyGameModes::CyIndividualSurvivalModeLobbyUI::sub_750220()`。
+
+```text
+Kill values: 20 / 30 / 40 / 50
+```
+
+| Index | Display | Value |
+|---:|---|---:|
+| 0 | `20 Kill` | 20 |
+| 1 | `30 Kill` | 30 |
+| 2 | `40 Kill` | 40 |
+| 3 | `50 Kill` | 50 |
+
+Client 與 Wiki 一致。[C][WIKI][X]
+
+Runtime 尚待 kill counter、threshold end trigger、respawn timing、timeout result、reward/quest timing。[OPEN]
+
+### 14.3 Team Survival／チームサバイバル
+
+```text
+Kill values: 50 / 100 / 200
+```
+
+Client 與現行 Wiki 一致。[C][WIKI][X]
+
+歷史反證：2010-02-07 日本 `ver.Gp` 曾使用：
+
+```text
+染料ポイント 1000 / 2000 / 3000cc
+時間 10 / 20 / 30 分
+```
+
+所以：
+
+```text
+ModeName != immutable RuleSchema
+```
+
+Server 必須區分：
 
 ```text
 ClientBuild / ProtocolRevision
-├─ ModeId
-├─ RuleFamily
-├─ RuleValue
-├─ TimeOption
-└─ CapabilitySet
+Mode
+RuleFamily
+RuleValue
 ```
 
-不能：
+### 14.4 Pulp & Roll／パルプ＆ロール
 
 ```text
-ModeName → 永久固定 rule/value
+Time values: 15 / 30 / 45
 ```
 
-## 14. Server reconstruction
+Resource keys：`0x24 / 0x2D / 0x395`。[C]
 
-模式層應沿：
+Wiki 與 Client 一致。[C][WIKI][X]
+
+Runtime 尚待 pulp object、carrier/drop/pickup、A/B/C objective、phase、point producer、暴走、match end。[OPEN]
+
+### 14.5 Steel／スチールモード
 
 ```text
-Room setting
+Objective values: 1000 / 2000 / 3000 cc
+```
+
+`sub_751D20()` 明確建立這組 selector values。[C]
+
+不能直接由 `GR_WINCHANGE` 名稱推成 kill limit；Wiki behavior 與 Runtime objective 尚待完整閉合。[WIKI][OPEN]
+
+### 14.6 Occupy Renewal／new占領モード
+
+```text
+Point values: 300 / 500 / 700 / 1000
+Resource keys: 0x53B / 0x53C / 0x53D / 0x53E
+```
+
+Client 與 Wiki values 一致；resource key 對原始日文 literal 仍 `[OPEN]`。[C][RES][WIKI][X]
+
+### 14.7 Occupy／占領
+
+```text
+Round values: 1 / 2 / 3
+```
+
+與 Team Match 的 Round family 分開。[C]
+
+### 14.8 Practice／練習モード
+
+```text
+999 Kill
+```
+
+Tutorial 亦存在 `999 Kill`。
+
+Wiki 指出 Practice 的 `999 kill` 不依一般 Kill target 正常結束，因此 Server 不應只有：
+
+```text
+if Kill >= RuleValue:
+    MatchEnd()
+```
+
+而應由 mode-specific `IsMatchOver()` 決定。[C][WIKI]
+
+### 14.9 Soccer／サッカーモード
+
+Time：
+
+```text
+7 / 10 / 15 / 20
+```
+
+Goal：
+
+```text
+5 / 7 / 10 / 15
+```
+
+Client 明確分成兩套 builder，因此必須保留：
+
+```text
+TimeOption
+GoalOption
+```
+
+不可併成單一 option family。[C][WIKI][X]
+
+## 15. Mode / Rule / Objective 的 Server 模型
+
+```text
+ClientBuild / ProtocolRevision
     ↓
-Client mode / CGameRule
+ModeId
+    ↓
+Room selectors
+    ├─ Map.OptionIndex / OptionValue
+    ├─ Rule.OptionIndex / OptionValue
+    ├─ Object.OptionIndex / OptionValue
+    ├─ Time.OptionIndex / OptionValue
+    └─ packed flags
     ↓
 ModeRuntime
     ├─ Phase
@@ -395,24 +547,95 @@ ModeRuntime
     ├─ ObjectiveValue
     ├─ ObjectiveState
     └─ MatchEndState
-    ↓
-score / objective
-    ↓
-Result / Reward / Quest
 ```
 
-具體 selector value 不能取代 mode rule；mode rule 也不能反向覆蓋 wire value。兩者要靠 C、Extracted、Wiki 三方證據閉合。
+`ModeId`、selector value、display value、wire value 與 Runtime condition 必須保持分層。[C][OPEN]
 
-## 15. 未閉合與最高價值追查
+## 16. Server reconstruction boundary
+
+Room setting 的安全資料流：
 
 ```text
-P0  各 mode builder → Room selector → 169/171/173/175 等 packet → CGameRule
-P0  mode-specific IsMatchOver() / round transition
-P1  bomb object / plant / defuse / fuse state
-P1  pulp carrier / objective state
-P1  steel objective producer
-P1  occupy capture state / point producer
-P1  soccer ball / goal state
-P1  capability validation（Knife / No Skill / Gimmick）
-P2  歷史版本與 2016 Final client 的 rule divergence
+UI selector state
+    ↓
+OptionValue validation
+    ↓
+Room state
+    ↓
+Start precondition
+    ↓
+CGameRule / ModeRuntime
+    ↓
+win / round / time / objective condition
 ```
+
+不要在 Server 中直接寫成：
+
+```text
+byte rule
+byte time
+ushort win
+```
+
+應保留 semantic object：
+
+```text
+MapOption
+RuleOption
+ObjectOption
+TimeOption
+PackedRoomFlags
+```
+
+並在 codec 層映射到 121/122、169/170、171/172、173/174、175/176 等 packet。[C]
+
+## 17. 三方交叉驗證
+
+### Map
+
+```text
+[C] GAMEROOM_SCROLL_MAP + entry +36 + object +130 + 121/122
+[RES] maplist.dat / .pmm resources
+[WIKI] Room / map selection behavior
+```
+
+三方互相支持，但仍分開保留各自責任。[X]
+
+### Time / Rule
+
+```text
+[C] selector value + 173/174 or 169/170
+[WIKI] player-visible options
+[RES] selector/resource system
+```
+
+### Objective / Item
+
+```text
+[C] 171/172 object selector、175/176 packed flags
+[WIKI] mode-specific objective / item settings
+[RES] concrete resource mapping
+```
+
+其中尚未閉合的對應仍保留 `[OPEN]`。
+
+## 18. 目前 OPEN 與最高價值追查
+
+```text
+P0  mode builder → selector → packet → CGameRule 完整映射
+P0  mode-specific IsMatchOver / round transition
+P0  171/172 object selector value → public rule/object semantics
+P1  169/170 rule value → exact mode/rule semantics
+P1  173/174 value → exact duration mapping
+P1  175 bit1 → exact public label
+P1  177/178 full sender/receiver semantics
+P1  team balance / team shuffle / no-skill wire mapping
+P1  bomb plant/defuse/fuse state
+P1  pulp carrier/objective state
+P1  steel objective producer
+P1  occupy capture/point producer
+P1  soccer ball/goal state
+P2  historical rule divergence across builds
+```
+
+所有未確認值保持 `[OPEN]`，不得為 Server 實作方便而填 `0`、固定常數或 guessed enum。
