@@ -11,16 +11,14 @@
 | 問題 | 第一入口 | 深入資料 |
 |---|---|---|
 | 網路 frame、XOR、checksum、Dispatcher | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) | [`Core/UDP_Move_Inf_DeepEvidence.md`](Core/UDP_Move_Inf_DeepEvidence.md) |
-| `165/166` gameplay | [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) | [`Core/Combat_Damage.md`](Core/Combat_Damage.md)、[`Core/Result_Quest_Stats.md`](Core/Result_Quest_Stats.md) |
-| `960–963` dropped weapon／pickup | [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) | 該文件 `960–963` 章節 |
+| `165/166`、Hit、Damage、960–963 | [`Core/Gameplay_Combat.md`](Core/Gameplay_Combat.md) | [`Core/Result_Quest_Stats.md`](Core/Result_Quest_Stats.md) |
+| UDP Movement | [`Core/UDP_Move_Inf_DeepEvidence.md`](Core/UDP_Move_Inf_DeepEvidence.md) | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) |
 | Login／Server List／`680–696` | [`Core/Login_Adjacent_680_696_Field_Schema.md`](Core/Login_Adjacent_680_696_Field_Schema.md) | [`Core/ClientData_Protocol.md`](Core/ClientData_Protocol.md) |
 | `198/200/203/218/220/221` wire layout | [`Core/ClientData_Protocol.md`](Core/ClientData_Protocol.md) | [`Core/Character_Inventory_Equipment.md`](Core/Character_Inventory_Equipment.md) |
 | Character／Appearance／Inventory／Weapon／PG／CASH／CP | [`Core/Character_Inventory_Equipment.md`](Core/Character_Inventory_Equipment.md) | [`Core/ClientData_Protocol.md`](Core/ClientData_Protocol.md) |
-| `101–221` Room／Channel／GameRule packet bytes | [`Core/Room_Channel_GameRule_101_221_Field_Evidence.md`](Core/Room_Channel_GameRule_101_221_Field_Evidence.md) | [`Core/Room_Lobby_GameRule.md`](Core/Room_Lobby_GameRule.md) |
-| Channel／Lobby／Room／Player／Map／GameRule lifecycle | [`Core/Room_Lobby_GameRule.md`](Core/Room_Lobby_GameRule.md) | `101–221` Field Evidence、[`Core/Room_Settings_Packets.md`](Core/Room_Settings_Packets.md) |
-| Mode／Rule／Selector value | [`Core/Mode_Rules_And_Options.md`](Core/Mode_Rules_And_Options.md) | [`Core/Server_State_Model.md`](Core/Server_State_Model.md) |
-| Combat／Hit／Damage | [`Core/Combat_Damage.md`](Core/Combat_Damage.md) | [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) |
-| UDP Movement | [`Core/UDP_Move_Inf_DeepEvidence.md`](Core/UDP_Move_Inf_DeepEvidence.md) | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) |
+| `101–221` Room／Channel／GameRule packet bytes | [`Core/Room_Channel_GameRule_101_221_Field_Evidence.md`](Core/Room_Channel_GameRule_101_221_Field_Evidence.md) | [`Core/Room_GameRule_Mode.md`](Core/Room_GameRule_Mode.md) |
+| Channel／Lobby／Room／Player／Map／GameRule／Mode lifecycle | [`Core/Room_GameRule_Mode.md`](Core/Room_GameRule_Mode.md) | `101–221` Field Evidence |
+| Mode／Rule／Selector value／Room settings | [`Core/Room_GameRule_Mode.md`](Core/Room_GameRule_Mode.md) | `101–221` Field Evidence |
 | Result／Score／K-D／Quest／Event／269 subtype 7 | [`Core/Result_Quest_Stats.md`](Core/Result_Quest_Stats.md) | 該文件 `269 subtype 7` 章節 |
 | Resource pack／loader／runtime | [`Core/Resource_Pack_Model.md`](Core/Resource_Pack_Model.md) | 使用該 Resource 的主文件 |
 | 跨子系統 Server abstraction | [`Core/Server_State_Model.md`](Core/Server_State_Model.md) | 再回各領域主文件 |
@@ -39,21 +37,18 @@
 | 文件 | 唯一責任 |
 |---|---|
 | [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、integrity/XOR、checksum、共用 codec、submission、Dispatcher |
-| [Core/Login_Adjacent_680_696_Field_Schema.md](Core/Login_Adjacent_680_696_Field_Schema.md) | `680–696` login-adjacent packet／parser／serializer |
+| [Core/Login_Adjacent_680_696_Field_Schema.md](Core/Login_Adjacent_680_696_Field_Schema.md) | `680–696` login/account-adjacent packet／parser／serializer |
 | [Core/ClientData_Protocol.md](Core/ClientData_Protocol.md) | `198` composite bootstrap、Family A/B/C/D、`200/203/218/220/221` ClientData wire schema 與 validation |
 | [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character／Appearance／Inventory／Weapon Loadout／Economy runtime model |
-| [Core/Room_Lobby_GameRule.md](Core/Room_Lobby_GameRule.md) | Channel／Lobby／Room／Player／Map／GameRule 高階 lifecycle 與關係 |
+| [Core/Room_GameRule_Mode.md](Core/Room_GameRule_Mode.md) | Channel／Lobby／Room／Player／Map／selector／Mode／GameRule lifecycle 與 mode rules |
 | [Core/Room_Channel_GameRule_101_221_Field_Evidence.md](Core/Room_Channel_GameRule_101_221_Field_Evidence.md) | `101–221` exact packet wire／parser／serializer／field evidence |
-| [Core/Room_Settings_Packets.md](Core/Room_Settings_Packets.md) | Room selector/value、設定 packet 與 UI data-flow |
-| [Core/Mode_Rules_And_Options.md](Core/Mode_Rules_And_Options.md) | ModeId、OptionIndex、OptionValue、模式規則與版本差異 |
-| [Core/Gameplay_Network.md](Core/Gameplay_Network.md) | `165/166` 與 `960–963` gameplay event families、subtype、Resource/state application |
-| [Core/Combat_Damage.md](Core/Combat_Damage.md) | Hit Detection、combat geometry、damage modifier、165 建包前計算 |
+| [Core/Gameplay_Combat.md](Core/Gameplay_Combat.md) | Hit／Damage → `165/166` → `960–963` gameplay event families |
 | [Core/UDP_Move_Inf_DeepEvidence.md](Core/UDP_Move_Inf_DeepEvidence.md) | UDP `8/24`、queue、27-byte actor record、movement/state fields |
 | [Core/Result_Quest_Stats.md](Core/Result_Quest_Stats.md) | Result、Score/K-D、Quest、Event，以及 `269 subtype 7` hydration |
 | [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | Resource pack、資料模型與 loader/runtime boundary |
 | [Core/Server_State_Model.md](Core/Server_State_Model.md) | 跨子系統 Server abstraction；不重新定義 Packet truth |
 
-**ClientData 邊界：** `ClientData_Protocol.md` 負責 wire；`Character_Inventory_Equipment.md` 負責玩家 domain/runtime。不要再把兩者拆成多份平行摘要。
+**目前核心主線只有這些文件。新增文件前，先證明既有文件不能承載。**
 
 ## 4. Kick Vote
 
@@ -69,7 +64,7 @@
 ```text
 先找所屬主題
     ↓
-需要 bytes → 該領域 Schema / Field Evidence
+需要 bytes → 該主題的 Protocol / Schema / Field Evidence
     ↓
 需要 transport → Network_Protocol
 ```
@@ -121,21 +116,22 @@ Channel_Lobby_Lifecycle.md
 Player_Slot_Team.md
 Map_And_Room.md
 GameRule_Lifecycle.md
-    → Core/Room_Lobby_GameRule.md
+    → Core/Room_GameRule_Mode.md
 
 Combat_Hit_Detection.md
 Damage_Calculation.md
-    → Core/Combat_Damage.md
+    → Core/Gameplay_Combat.md
 
 Mode_Rules.md
 Mode_Option_Tables.md
-    → Core/Mode_Rules_And_Options.md
+Room_Settings_Packets.md
+    → Core/Room_GameRule_Mode.md
 
 Gameplay_166_DeepEvidence.md
 Y_TCP_INF_Damage.md
 Packet_166_Field_Map.md
 DropWeapon_Protocol.md
-    → Core/Gameplay_Network.md
+    → Core/Gameplay_Combat.md
 
 Result_Stat_Protocol_223_245_381_389.md
 Quest_Event_ID_Mapping.md
