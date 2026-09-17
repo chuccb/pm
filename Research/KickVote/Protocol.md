@@ -1,7 +1,8 @@
 # Kick Vote 協定研究
 
-> 研究日期：2026-09-16
-> 目標版本：日本版 PaperMan 2016 年服務終了時 Client
+> 研究日期：2026-09-17
+> 目標版本：日本版 PaperMan 2016 年服務終了時的最終 Client。
+> 文件角色：Kick Vote 的 packet／wire protocol 主文件；UI 狀態與資格證據分別由 `UI_State.md` 與 `Evidence_And_Eligibility.md` 維護。
 
 ## 證據規則
 
@@ -50,18 +51,11 @@ sub_592A20(v5, a4);
 +0x08 u32 target_player_id
 ```
 
-`scope` 來自兩選項狀態，`reason_index` 來自六選項狀態，目標 ID 來自 `CVoteTargetList`。
+`scope` 來自兩選項狀態，`reason_index` 來自六選項狀態，目標 ID 來自 `CVoteTargetList`。[C]
 
-目前行為層面的 mapping：
+行為上的 `scope=0/1` 對應 Team／Full Kick 由 `Evidence_And_Eligibility.md` 統一維護；本文件只保留 wire 層與 serializer 證據，避免重複第二份資格模型。[X]
 
-```text
-0 = チームキック
-1 = 全体キック
-```
-
-這個 mapping 有 Wiki + C + target-list filtering 的強交叉證據，但原始內部 enum 名稱仍未恢復。
-
-更深一層：`sub_A17340()` 並非單純查詢；只有 `sub_A17290()` 回傳 `3` 才繼續，而且成功時會先把 Voter `+28 = 1`。因此 `+28` 應視為 request/active-lock-like state，精確原始名稱仍 `[OPEN]`。
+更深一層：`sub_A17340()` 並非單純查詢；只有 `sub_A17290()` 回傳 `3` 才繼續，而且成功時會先把 Voter `+28 = 1`。因此 `+28` 應視為 request/active-lock-like state，精確原始名稱仍 `[OPEN]`。[C]
 
 ## 719 `GR_START_VOTING_ACK`
 
@@ -88,7 +82,7 @@ case 719:
 3 -> message resource 879
 ```
 
-其函式 signature 與 719 dispatcher 的單一 `int` virtual-call 形狀吻合，因此 **719 → `sub_A19380` 已達很高 confidence 的 concrete dispatch mapping**；但 `0/1/2/3` 的產品層 enum 名稱與 878/879/880 的日文 literal 仍 `[OPEN]`，不得直接命名成 `SUCCESS` / `DENIED` 等。
+其函式 signature 與 719 dispatcher 的單一 `int` virtual-call 形狀吻合，因此 **719 → `sub_A19380` 已達很高 confidence 的 concrete dispatch mapping**；但 `0/1/2/3` 的產品層 enum 名稱與 878/879/880 的日文 literal 仍 `[OPEN]`，不得直接命名成 `SUCCESS` / `DENIED` 等。[C][OPEN]
 
 ## 720 `GR_START_VOTING`
 
@@ -116,11 +110,11 @@ case 720:
 
 ### 前三欄
 
-`sub_A19460` 直接將第一欄送入 `sub_A19090` 作為 reason；第二欄保存為 applicant ID，並與本地 player ID 比較；第三欄保存／解析為目標 ID。這三欄可視為高可信固定語意。
+`sub_A19460` 直接將第一欄送入 `sub_A19090` 作為 reason；第二欄保存為 applicant ID，並與本地 player ID 比較；第三欄保存／解析為目標 ID。這三欄可視為高可信固定語意。[C]
 
 ### 第四欄：duration
 
-`duration` 進入 `sub_A17130(..., a5)`，成為 Voter `+20`；`sub_A17380(elapsed)` 再以經過時間扣減並 clamp 至 0；`VoterMgr::sub_A19940` 將剩餘值送到 `CVotingStateUI`，UI 再以 `remaining / 0x3E8u` 形成秒數顯示。
+`duration` 進入 `sub_A17130(..., a5)`，成為 Voter `+20`；`sub_A17380(elapsed)` 再以經過時間扣減並 clamp 至 0；`VoterMgr::sub_A19940` 將剩餘值送到 `CVotingStateUI`，UI 再以 `remaining / 0x3E8u` 形成秒數顯示。[C]
 
 因此：
 
@@ -129,13 +123,7 @@ case 720:
 unit = millisecond scale
 ```
 
-Wiki 公開規則為 70 秒，因此相容 Server 的自然值是：
-
-```text
-70000 ms
-```
-
-但這是 Wiki + Client behavior inference，不是目前找到的 `70000` binary literal。
+日本 Wiki 公開規則為 70 秒。由此得到的 `70000 ms` 是 **Wiki + Client 行為的相容性推導值**，不是目前找到的 `70000` binary literal。[WIKI][C][X]
 
 ### 第五欄：control
 
@@ -210,7 +198,7 @@ else
     ++*(this + 21);
 ```
 
-因此目前 client aggregation 語意為：
+因此目前 Client aggregation 語意為：
 
 ```text
 0       = NO
@@ -237,7 +225,7 @@ case 722:
 +0x04 u8 vote
 ```
 
-`IVotingNetwork::sub_A19890` 先把 voter ID 轉交 player-side state，再呼叫 `sub_A1A9D0`；後者明確累積 YES / NO counter。這使 722 的「wire width + voter identity + vote aggregation」鏈條完整閉合。
+`IVotingNetwork::sub_A19890` 先把 voter ID 轉交 player-side state，再呼叫 `sub_A1A9D0`；後者明確累積 YES / NO counter。這使 722 的「wire width + voter identity + vote aggregation」鏈條完整閉合。[C]
 
 若收到的是 applicant/local player，自身 UI 邏輯還有額外分支；不要把一般 voter 與 applicant result path 合併成同一 state transition。
 
@@ -275,15 +263,15 @@ sub_A17180(this - 48, a2);          // result byte
 清除 +29 / +32 voting-active state
 ```
 
-接著只有在 player-side virtual lookup 成功時，才呼叫 `sub_A1A970()` 更新結果 UI；其後 `sub_A18F80(..., 0)` 進行 voting UI cleanup。
+接著只有在 player-side virtual lookup 成功時，才呼叫 `sub_A1A970()` 更新結果 UI；其後 `sub_A18F80(..., 0)` 進行 voting UI cleanup。[C]
 
 因此目前已能更精確地說：
 
 > **723 在此 Client 上的直接可觀察責任是「final result → Voter/UI state transition + cleanup」，不是已證明的「直接修改 room/player occupancy」。**
 
-目前在這條 723 → `sub_A19770` → `sub_A1A970` / `sub_A18F80` chain 中沒有看到直接構造 `396 PM_KICKUSER_REQ` 的證據，所以兩者仍不能直接視為同一 packet。
+目前在這條 723 → `sub_A19770` → `sub_A1A970` / `sub_A18F80` chain 中沒有看到直接構造 `396 PM_KICKUSER_REQ` 的證據，所以兩者仍不能直接視為同一 packet。[C][OPEN]
 
-`result_state` 的 literal enum 仍 `[OPEN]`；尤其值 `1` 雖在 local-target path 有特殊 3000ms transition，但尚不足以單獨命名成 `SUCCESS` / `KICKED`。
+`result_state` 的 literal enum 仍 `[OPEN]`；尤其值 `1` 雖在 local-target path 有特殊 3000ms transition，但不足以單獨命名成 `SUCCESS` / `KICKED`。
 
 ## 139 voting lifecycle signal
 
@@ -293,7 +281,7 @@ sub_A17180(this - 48, a2);          // result byte
 byte_2317C68 = 1;
 ```
 
-而 `sub_A17380()` 的部分 countdown/phase update 只有在 `byte_2317C68 == 0` 時才繼續。因此 139 明顯屬於 voting lifecycle/control path，但目前尚不能把它正式命名成 `END_VOTE`、`CANCEL_VOTE` 或其他具體 enum。
+而 `sub_A17380()` 的部分 countdown/phase update 只有在 `byte_2317C68 == 0` 時才繼續。因此 139 明顯屬於 voting lifecycle/control path，但目前尚不能把它正式命名成 `END_VOTE`、`CANCEL_VOTE` 或其他具體 enum。[C][OPEN]
 
 ## 396 / 397 分層
 
@@ -328,7 +316,7 @@ case 397u:
 397 payload = u8 status
 ```
 
-396 的 request body 仍未找到直接 serializer/caller，因此不要猜 body。
+396 的 request body 仍未找到直接 serializer/caller，因此不要猜 body。[C][OPEN]
 
 ## Vote lifecycle
 
