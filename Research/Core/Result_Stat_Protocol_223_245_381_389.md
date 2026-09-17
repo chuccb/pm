@@ -1,42 +1,42 @@
-# PaperMan 2016 JP — Result / Long-Term Stat Packet Protocol 223–245 / 381–389
+# `223–245`／`381–389` 結果、長期統計與 Quest 協定
 
-> 研究日期：2026-09-17  
-> Target：PaperMan 日本版 2016 結束營運時最終版 Client  
-> Evidence：IDA `PaperMan.exe.c` exact dispatcher/parser/serializer + Client UI labels + Quest callsites + Wiki timing cross-check  
-> Confidence：直接 Client code = A；未閉合 semantic 保留 raw opcode/field name
+> 研究目標：日本版 PaperMan 2016 年服務終了時的最終 Client。
+> 更新基準：2026-09-17。
+>
+> 本文件是 `223–245`、`381–389` 結果／長期統計／Quest 網路資料域的唯一主文件。原本 `Quest_Result_Packets_223_245.md` 與 `Score_State.md` 的研究已整合至此。`Quest_Event_ID_Mapping.md` 仍保留，因它是跨多個網路事件的 Quest ID 字典，而不是本文件的結果封包副本。
 
-## 1. Architectural distinction
+## 1. 架構定位
 
-這一族不是 TCP 166 的即時 actor event，也不是 UDP movement。
-
-它主要同步 Client 的長期/結果統計值，部分 packet 再觸發 Quest condition progress。
+這一族不是 TCP 166 即時 actor event，也不是 UDP movement。它主要同步 Client 的長期紀錄、結果統計與部分 Quest condition state。
 
 ```text
-Server result/stat state
+Server result / record state
     ↓
 223–245 / 381–389
     ↓
-Client global stat variables
+Client global statistics
     ↓
 MyInfo / GameRoom / Result UI
     ↓
 Quest condition evaluation
 ```
 
-不要把這些 global result variables 與：
+必須與以下資料層分開：
 
 ```text
-player +240600 / +240604   ← round/live participant result
-player +60150 / +60151     ← result-screen MY K/D fields
+player +240600 / +240604
+    = live round / participant K/D-like state
+
+player +60150 / +60151
+    = local result-screen My K/D
+
+F6DCF8 / F6DCFC
+    = per-player Server-provided result K/D
 ```
 
-混為同一層。
+## 2. Dispatcher
 
----
-
-## 2. Dispatcher：已證實的 packet → parser mapping
-
-`sub_58B010()`：
+`sub_58B010()` 直接路由：
 
 ```text
 223 → sub_556730
@@ -58,87 +58,88 @@ player +60150 / +60151     ← result-screen MY K/D fields
 389 → sub_556E30
 ```
 
-這是直接 dispatcher evidence。[A]
+這是直接 dispatcher 證據。[C]
 
----
+## 3. 長期個人紀錄欄位
 
-## 3. Long-term record counters
-
-Client UI 明確把以下 globals 顯示成：
+Client UI 明確使用：
 
 ```text
-EE8D40 → GAMEROOM_RECORDWIN / RECORDWIN
-EE8D44 → GAMEROOM_RECORDLOSE / RECORDLOSE
-EE8D48 → GAMEROOM_KILL / KILL
-EE8D4C → GAMEROOM_DEATH / DEATH
+EE8D40 → RECORDWIN / TOTAL_WIN
+EE8D44 → RECORDLOSE / TOTAL_LOSE
+EE8D48 → KILL
+EE8D4C → DEATH
+EE8D50 → HEADSHOT
+EE8D54 → AIRCOMBO
+EE8D58 → HEARTBREAK
+EE8D5C → CRITICALSHOT
+EE8D60 → DOUBLEKILL
+EE8D64 → TRIPLEKILL
+EE8D68 → MULTIKILL
+EE8D6C → ULTRAKILL
+EE8D70 → GENOCIDE
+EE8D74 → KILLINGMACHINE
+EE8D78 → DIABLO
 ```
 
-MyInfo/record UI 亦直接顯示相同四個值：
+Result-screen globals：
 
 ```text
-TOTAL_WIN
-TOTAL_LOSE
-MY_KILL
-MY_DEATH
+EE8DB0 → SOLO_RESULT_R_HEADSHOT
+EE8DB4 → SOLO_RESULT_R_AIRCOMBO
+EE8DB8 → SOLO_RESULT_R_HEARTCNT
+EE8DBC → SOLO_RESULT_R_CRITICAL
 ```
 
-因此這一層是 Client 的 long-term/per-profile result records，而不是單局 actor state。[A]
+Per-player result fields：
 
-### 3.1 Packet 229
+```text
+player +31    → SOLO_RESULT_R_ASSIST
+player +60150 → SOLO_RESULT_R_MY_KILL
+player +60151 → SOLO_RESULT_R_MY_DEATH
+```
 
-Parser：
+這證明 Result／MyInfo 並不是單一平坦 scoreboard，而是多層 state。[C]
+
+## 4. Packet 229 / 231：Win／Lose long-term records
+
+### 229
 
 ```c
 sub_592A40(a1, dword_EE8D40);
 sub_92EF00(5, 23, 1, 0);
 ```
 
-即：
+因此：
 
 ```text
-u32 → EE8D40
+229 body = u32
+229 value → EE8D40 = TOTAL_WIN / RECORDWIN
+receipt → Quest condition 5
 ```
 
-UI semantic：
+Quest 5 的正式公開名稱仍以 Quest resource row 為準。[C]
 
-```text
-EE8D40 = RECORDWIN / TOTAL_WIN
-```
-
-並在收到 packet 後執行 Quest condition 5。
-
-**可確定：229 的 body 是一個 u32 long-term win/record value。**[A]
-
-Quest5 的正式公開名稱仍應以 Quest resource row 再核，但它與 `TOTAL_WIN` 的 Client state source 已閉合。[A]
-
-### 3.2 Packet 231
-
-Parser：
+### 231
 
 ```c
 sub_592A40(a1, dword_EE8D44);
 sub_92EF00(6, 23, 1, 0);
 ```
 
-即：
+因此：
 
 ```text
-u32 → EE8D44
+231 body = u32
+231 value → EE8D44 = TOTAL_LOSE / RECORDLOSE
+receipt → Quest condition 6
 ```
 
-UI semantic：
+不能因此自行把 Quest 6 命名成「敗數 Quest」；Quest 公開 label 仍待 Resource 對照。[C][OPEN]
 
-```text
-EE8D44 = RECORDLOSE / TOTAL_LOSE
-```
+## 5. Packet 233 / 235：長期 Kill／Death record
 
-因此 231 是一個 `u32` 的 long-term loss/record state synchronization packet。[A]
-
-**注意：不能因此直接把 Quest6 命名成「敗數 Quest」；Wiki 公開條件列表主要使用「勝數」「プレイ回数」等名稱，正式 Quest6 label 仍需 resource row。[C/A]
-
-### 3.3 Packet 233
-
-Parser：
+### 233
 
 ```c
 sub_592A40(a1, &v2);
@@ -146,200 +147,148 @@ dword_EE8DAC += v2 - *dword_EE8D48;
 *dword_EE8D48 = v2;
 ```
 
-即：
+因此：
 
 ```text
-u32 server value
-    ↓
-EE8D48 = KILL record
-    ↓
-EE8DAC += delta
+233 body = u32
+233 value → EE8D48 = absolute / monotonic KILL record
+EE8DAC   = delta accumulator
 ```
 
-所以 `EE8D48` 是 server-provided absolute/monotonic kill record value，Client 同時維護一個 `EE8DAC` 的 delta accumulation。
+`EE8DAC` 目前沒有足夠 UI evidence 形成正式公開名稱。[C][OPEN]
 
-不要把 `EE8DAC` 自動當成另一個 K/D 顯示欄位；目前 exact UI label 尚未找到。[A]
-
-### 3.4 Packet 235
+### 235
 
 ```c
 sub_592A40(a1, dword_EE8D4C);
 ```
 
-即：
+因此：
 
 ```text
-u32 → EE8D4C = DEATH record
+235 body = u32
+235 value → EE8D4C = long-term DEATH record
 ```
 
-目前這個 parser 沒有額外 Quest call。[A]
+目前 parser 沒有直接 Quest call。[C]
 
----
-
-## 4. Special-shot / result-stat pair packets
-
-這一組都使用共同 helper：
+## 6. Packet 223：Play-time / timing-like state
 
 ```c
-sub_556A00(int *state, packet)
-```
-
-其實際行為：
-
-```text
-u32 newCurrent
-u32 associatedValue
-```
-
-兩個 consecutive `u32`。[A]
-
-### 4.1 Packet 237
-
-```text
-old current = *EE8D50
-read u32 current
-read u32 associated
-associated → EE8DB0
-old/global current ← current
-```
-
-UI：
-
-```text
-EE8DB0 = HEADSHOT
-```
-
-所以：
-
-```text
-237 = 2×u32 special/result stat record
-       → updates HEADSHOT result value
-```
-
-[A]
-
-### 4.2 Packet 239
-
-```text
-old current = *EE8D54
-read 2×u32
-second → EE8DB4
-first → EE8D54
-```
-
-UI：
-
-```text
-EE8DB4 = AIRCOMBO
+sub_592A40(a1, &v2);
+sub_92EF00(21, 23, v2 - dword_EE8D34, 0);
+dword_EE8D34 = v2;
 ```
 
 因此：
 
 ```text
-239 = AIRCOMBO result-stat pair
+223 body = u32
+223 value = monotonically tracked time-like state
+Quest21 amount = delta from previous value
 ```
 
-[A]
+Wiki 的 Quest 規則指出 Play Time 以分鐘計算並捨棄不足一分鐘的餘數；但 packet raw unit 尚不能單憑除法就命名為 milliseconds。[C][WIKI][OPEN]
 
-### 4.3 Packet 241
+## 7. Packet 225 / 227：鄰近 state values
 
 ```text
-old current = *EE8D5C
-read 2×u32
-second → EE8DBC
-first → EE8D5C
+225 → u32 → EE8D38
+227 → u32 → EE8D3C
 ```
 
-UI：
+目前沒有足夠直接 consumer evidence 完成正式公開名稱，因此保持：
 
 ```text
-EE8DBC = CRITICALSHOT
+EE8D38 = raw u32 state from 225
+EE8D3C = raw u32 state from 227
 ```
 
-因此：
+後續應從 UI、producer 與 resource 對照閉合。[C][OPEN]
 
-```text
-241 = CRITICALSHOT result-stat pair
-```
+## 8. `237 / 239 / 241 / 243 / 245`：雙 `u32` 統計配對
 
-[A]
-
-### 4.4 Packet 239/241/237 ordering must not be inferred from opcode numbers
-
-The public semantic comes from Client UI consumers:
-
-```text
-237 → HEADSHOT
-239 → AIRCOMBO
-241 → CRITICALSHOT
-```
-
-rather than from numeric adjacency.
-
----
-
-## 5. Heartbreak result stat
-
-Packet 243 is **not** Heartbreak.
-
-Heartbreak is:
-
-```text
-EE8DB8 → SOLO_RESULT_R_HEARTCNT
-```
-
-and MyInfo uses:
-
-```text
-*EE8D58 → HEARTBREAK
-```
-
-The parser that updates this is:
-
-```text
-sub_556AF0 → packet 241 in the main dispatcher
-             or corresponding legacy/current route depending on dispatcher table
-```
-
-Therefore the exact mapping between `EE8D58`/`EE8DB8` and packet opcode is retained at function-level, not guessed from variable order. [A]
-
-> **Important correction:** do not assume packet 241 because of the sequential offset pattern; exact dispatcher evidence should be consulted when implementing.
-
----
-
-## 6. Multi-kill / combo stat packet family 243–389
-
-### Packet 243
-
-Parser:
+共同 helper：
 
 ```c
-v2[0] = *dword_EE8D60;
-sub_556A00(v2, a1);
-dword_EE8DC0 = v2[1];
-*dword_EE8D60 = v2[0];
-sub_61FE40(&dword_1D09130, 5, 0, 0, 110);
-sub_92EF00(11, 5, 0, 0);
+sub_556A00(state, packet)
 ```
 
-UI:
+直接讀取：
 
 ```text
-EE8D60 = DOUBLEKILL current/record state
-EE8DC0 = secondary value
+u32 ValueA
+u32 ValueB
 ```
 
-The Client MyInfo UI directly displays `EE8D60` under:
+所以這些 packet 都具有 8-byte logical body。[C]
+
+### 8.1 237：HEADSHOT
 
 ```text
-DOUBLEKILL
+ValueA → EE8D50
+ValueB → EE8DB0
 ```
 
-Quest condition 11 is evaluated with source/discriminator `5`.
+UI 對應 `HEADSHOT` / `SOLO_RESULT_R_HEADSHOT`。[C]
 
-### Packet 245
+### 8.2 239：AIRCOMBO
 
-A client-side request constructor exists:
+```text
+ValueA → EE8D54
+ValueB → EE8DB4
+```
+
+UI 對應 `AIRCOMBO` / `SOLO_RESULT_R_AIRCOMBO`。[C]
+
+### 8.3 241：CRITICALSHOT／相關 result state
+
+Client 具有：
+
+```text
+ValueA → EE8D5C
+ValueB → EE8DBC
+```
+
+UI 對應 `CRITICALSHOT` / `SOLO_RESULT_R_CRITICAL`。[C]
+
+研究時不可只依 opcode 相鄰性命名，應依 Client UI consumer 與 data-flow。[C]
+
+### 8.4 243：DOUBLEKILL
+
+```text
+ValueA → EE8D60
+ValueB → EE8DC0
+```
+
+UI 對應 `DOUBLEKILL`；收到後還會：
+
+```text
+sub_61FE40(..., 5, 0, 0, 110)
+sub_92EF00(11, 5, 0, 0)
+```
+
+因此 `243` 同時是長期統計同步與 Quest condition 11 的觸發點。[C]
+
+### 8.5 245：TRIPLEKILL
+
+parser：
+
+```text
+ValueA → EE8D64
+ValueB → EE8DC4
+```
+
+並：
+
+```text
+sub_61FE40(..., 6, 0, 0, 110)
+sub_92EF00(12, 6, 0, 0)
+```
+
+UI 對應 `TRIPLEKILL`。[C]
+
+另存在 Client→Server opcode 244 request：
 
 ```c
 Packet::possible_ctor_or_dtor_0(v1, 244);
@@ -347,39 +296,28 @@ sub_592A20(v1, a1);
 *dword_EE8D64 = a1;
 ```
 
-and parser 245 does:
-
-```c
-v2[0] = *dword_EE8D64;
-sub_556A00(v2, a1);
-dword_EE8DC4 = v2[1];
-*dword_EE8D64 = v2[0];
-sub_61FE40(..., 6, 0, 0, 110);
-sub_92EF00(12, 6, 0, 0);
-```
-
-UI:
+因此：
 
 ```text
-EE8D64 = TRIPLEKILL
-EE8DC4 = secondary value
+244 = request carrying u32
+245 = result/state carrying 2×u32
 ```
 
-Thus 244/245 form a request/result pair with the request carrying one `u32` baseline/current value and the server response carrying a 2×u32 state pair.[A]
+這是 request/result 結構差異的直接證據。[C]
 
-### Packets 381 / 383 / 385 / 387 / 389
+## 9. 381 / 383 / 385 / 387 / 389：連續擊殺統計族
 
-All are parser-only Server→Client paths in the current C export:
+共同使用兩個 u32 state：
 
 ```text
-381 → sub_556CB0 → EE8D68 / EE8DC8 → DOUBLE/MULTI chain source 7 → Quest13
-383 → sub_556D10 → EE8D6C / EE8DCC → source 8 → Quest14
-385 → sub_556D70 → EE8D70 / EE8DD0 → source 9 → Quest15
-387 → sub_556DD0 → EE8D74 / EE8DD4 → source 10 → Quest16
-389 → sub_556E30 → EE8D78 / EE8DD8 → source 11 → Quest17
+381 → EE8D68 / EE8DC8 → source 7 → Quest13
+383 → EE8D6C / EE8DCC → source 8 → Quest14
+385 → EE8D70 / EE8DD0 → source 9 → Quest15
+387 → EE8D74 / EE8DD4 → source 10 → Quest16
+389 → EE8D78 / EE8DD8 → source 11 → Quest17
 ```
 
-Client MyInfo labels prove:
+UI 直接命名：
 
 ```text
 EE8D68 = MULTIKILL
@@ -389,198 +327,205 @@ EE8D74 = KILLINGMACHINE
 EE8D78 = DIABLO
 ```
 
-And the Quest mapping is direct:
+每個 packet 都透過共同 2×u32 解析器更新 current/secondary state，再觸發：
 
 ```text
-Quest11 ← source5
-Quest12 ← source6
-Quest13 ← source7
-Quest14 ← source8
-Quest15 ← source9
-Quest16 ← source10
-Quest17 ← source11
+sub_61FE40(..., source 7..11, ..., 110)
+sub_92EF00(Quest13..17, source 7..11, 0, 0)
 ```
 
-The Wiki independently documents the consecutive-kill hierarchy: Killing Machine is the 7th consecutive kill; the 8th and later are Diablo, with the chain governed by the short consecutive-kill interval.[C]
+日本 Wiki 另描述 consecutive-kill hierarchy，包括 Killing Machine 與 Diablo 的連續擊殺條件；這可作為 public behavior 的外部旁證，但不替代 packet field proof。[C][WIKI]
 
-This gives a strong semantic bridge between the Client's stat labels and the Wiki behavior, while the exact 381–389 packet body remains `2×u32` until more server-side semantics are recovered.[A/C]
+## 10. Quest condition 的三條主要網路來源
 
----
+Client Quest progress 至少存在：
 
-## 7. Packet 223: play-time synchronization
+```text
+A. Gameplay event
+   166 subtype 2/16
+   → n2 / resource
+   → sub_92EF00(...)
 
-Parser:
+B. Dedicated result/record packets
+   223–245 / 381–389
+   → state value(s)
+   → sub_92EF00(...)
+
+C. Specialized gameplay result events
+   994 / Assist
+   353/309 等 player/result event
+   35 / Soccer Goal
+```
+
+因此 Quest 是橫跨 gameplay、result、長期紀錄的共同消費者，不應被 Server 寫成「只靠 Kill packet 驅動」。[C]
+
+## 11. Score／K-D State：與 166 及 Result UI 的三層分離
+
+### 11.1 Server-provided player Result K/D
+
+`TCP 269 subtype 7` 直接將：
+
+```text
+v433 → dword_F6DCF8[60195 * slot]
+v383 → dword_F6DCFC[60195 * slot]
+```
+
+Result UI 又直接讀取：
+
+```text
+F6DCF8 = KILL
+F6DCFC = DEATH
+```
+
+因此這是 Server-provided per-player result/stat hydration。[C]
+
+### 11.2 Live round participant K/D
+
+`Y_TCP_INF_ACK (166)` subtype 2/16 的 death/gameplay 路徑會：
+
+```text
+participant A → +240600 ++
+participant B → +240604 ++（a4=0）
+```
+
+這屬於即時 round/mode-local state。[C]
+
+### 11.3 Local result-screen My K/D
+
+```text
++60150 → SOLO_RESULT_R_MY_KILL
++60151 → SOLO_RESULT_R_MY_DEATH
+```
+
+目前對 `+60151` 找得到直接 death-path write，但對 `+60150` 尚未找到同等直接 gameplay increment。[C][OPEN]
+
+因此三層必須分開：
+
+```text
+live participant state
+    ≠
+server result synchronization
+    ≠
+local result-screen presentation state
+```
+
+## 12. Result ranking comparator
+
+`sub_6482C0(a1, a2)` 實際比較：
 
 ```c
-u32 v2;
-sub_592A40(a1, &v2);
-sub_92EF00(21, 23, v2 - dword_EE8D34, 0);
-dword_EE8D34 = v2;
+if (KillA != KillB)
+    return KillA >= KillB;
+
+if (DeathA == DeathB)
+    return F33184A < F33184B;
+
+return DeathA < DeathB;
 ```
 
-Thus:
+因此 C 直接證明的 comparator 是：
 
 ```text
-223 body = u32
-223 u32 = monotonically tracked time-like server value
-Quest21 amount = delta from previous value
+1. Kill 高者優先
+2. Kill 相同 → Death 低者優先
+3. 兩者相同 → dword_F33184 低者優先
 ```
 
-Wiki cross-check says Play Time progress is measured in minutes and discards sub-60-second remainder, but the Client packet's raw unit should remain `u32 time-like` until more producer evidence closes the exact unit.[C]
+`dword_F33184` 的寫入來源目前未閉合。不得因 Wiki 的某項 tie-break 規則就把它命名成 participant count 或其它公開欄位。[C][OPEN]
 
----
+## 13. High-score selector
 
-## 8. Packet 225 / 227: state values without direct Quest mutation
+`sub_759030()` 掃描 16 個 player slot，使用同一 Kill/Death/`F33184` 比較鏈尋找高成績玩家。它的結果再交給 Individual Survival mode display。[C]
+
+因此 Kill/Death comparator 不只是 UI 排序，也參與 mode/runtime 選擇。[C]
+
+## 14. Wiki × C 的模式驗證
+
+日本 Wiki 的個人サバイバル規則以「時間內擊殺數」決定勝負，並列出 20/30/40/50 Kill 及 10/15/20 分等條件；C 則直接以 `F6DCF8` 顯示 KILL、`F6DCFC` 顯示 DEATH，並用 Kill/Death comparator 選取高成績。[WIKI][C][X]
+
+チームサバイバル則以隊伍累積擊殺數作為模式層勝負條件，但 Client result state 仍是 per-player K/D，因此 Server 應拆成：
 
 ```text
-225 → u32 → EE8D38
-227 → u32 → EE8D3C
+PlayerScore
+├─ Kill
+└─ Death
+
+TeamRule
+└─ mode-specific aggregation
 ```
 
-Their current exact public semantics are not proved by their local parser alone.
+不可把 `F6DCF8` 命名成 `TeamKills`。[WIKI][C]
 
-They are displayed/used elsewhere as record-layer state, but the final public labels must be derived from surrounding Client UI/producer context rather than variable order.
+## 15. Resource 分層證據
 
-Keep raw:
+`Extracted/0.xml` 直接列出：
+
+```xml
+<PackFile key="character" filename="Data\\character.dat" folderpath="character\\" />
+<PackFile key="item" filename="Data\\item.dat" folderpath="item\\" />
+<PackFile key="map" filename="Data\\map.dat" folderpath="map\\" />
+<PackFile key="pmClient" filename="Data\\pmClient.dat" folderpath="" />
+```
+
+`ClientDataList.xml` 又存在：
+
+```xml
+<DataList key="BulletHole" />
+<DataList key="effect" />
+<DataList key="ui" />
+<DataList key="ui_temp" />
+```
+
+這支持：
 
 ```text
-EE8D38 = u32 state/value from 225
-EE8D3C = u32 state/value from 227
+Wiki       = public behavior
+Extracted  = resource/data identity
+IDA C/LST  = executable data-flow / protocol evidence
 ```
 
-until further mapping.
+但不能因資源樹存在就單獨宣布某個 score field 的 semantic。[RES]
 
----
+## 16. Server Reconstruction 模型
 
-## 9. Client→Server request packets
-
-### 9.1 Opcode 230
-
-`sub_5567F0(int a1)`:
+結果／長期統計層應至少抽象為：
 
 ```text
-Packet opcode 230
-body: u32 a1
-store same value into EE8D44
+PlayerRecord
+├─ WinRecord
+├─ LoseRecord
+├─ KillRecord
+├─ DeathRecord
+├─ SpecialShotRecords
+├─ ConsecutiveKillRecords
+└─ UnknownSecondaryValues
 ```
 
-This is Client→Server because the function constructs a Packet and invokes `sub_555090(socket, packet)`.[A]
-
-### 9.2 Opcode 232
-
-`sub_5568E0(int a1)`:
+Quest 應為獨立 consumer：
 
 ```text
-Packet opcode 232
-body: u32 a1
-store same value into EE8D48
+Result/Record Packet
+    ↓
+Client record state
+    ↓
+Quest condition evaluation
 ```
 
-Client→Server.[A]
+不能把 `QuestIndex` 直接當成資料庫欄位，也不能把 `ValueB` 未證明地命名成 threshold、timestamp 或 count。
 
-### 9.3 Opcode 244
-
-`sub_556B90(int a1)`:
+## 17. 尚未閉合的項目
 
 ```text
-Packet opcode 244
-body: u32 a1
-store same value into EE8D64
+1. EE8D38 / EE8D3C 的正式公開語意
+2. EE8DAC 的正式用途
+3. 223 的實際時間單位與 producer
+4. 237/239/241/243/245 與 381–389 的第二個 u32 語意
+5. Quest5/6/11–17 的正式 resource label
+6. 225/227/233/235 等 request/send counterpart
+7. 381–389 的 Server sender 與完整 result generation
+8. dword_F33184 的 writer/source
+9. +60150 的真正 gameplay/result writer
+10. 223–389 outer framing、sequence、checksum、encryption
 ```
 
-Client→Server.[A]
-
-These request constructors do not by themselves prove the business meaning of the outgoing value; their state coupling is proven by the matching global variable and result parser.[A]
-
----
-
-## 10. Result UI: exact current stat storage map
-
-From Client UI:
-
-```text
-Long-term / MyInfo:
-    EE8D40 → RECORDWIN
-    EE8D44 → RECORDLOSE
-    EE8D48 → KILL
-    EE8D4C → DEATH
-    EE8D50 → HEADSHOT
-    EE8D58 → HEARTBREAK
-    EE8D5C → CRITICALSHOT
-    EE8D54 → AIRCOMBO
-    EE8D60 → DOUBLEKILL
-    EE8D64 → TRIPLEKILL
-    EE8D68 → MULTIKILL
-    EE8D6C → ULTRAKILL
-    EE8D70 → GENOCIDE
-    EE8D74 → KILLINGMACHINE
-    EE8D78 → DIABLO
-```
-
-Result-screen globals:
-
-```text
-EE8DB0 → SOLO_RESULT_R_HEADSHOT
-EE8DB4 → SOLO_RESULT_R_AIRCOMBO
-EE8DB8 → SOLO_RESULT_R_HEARTCNT
-EE8DBC → SOLO_RESULT_R_CRITICAL
-```
-
-Per-player result fields:
-
-```text
-player +31    → SOLO_RESULT_R_ASSIST
-player +60150 → SOLO_RESULT_R_MY_KILL
-player +60151 → SOLO_RESULT_R_MY_DEATH
-```
-
-This is a three-layer statistic model, not one flat scoreboard.
-
----
-
-## 11. Quest timing cross-check
-
-The 2016-02-19 Wiki Quest system states:
-
-```text
-Kill count / special shot / multi-shot / assist
-    → updated during the match
-
-Play time / wins / play count / EXP/PG item collection
-    → generally updated at match end / leave
-```
-
-and explicitly says play-time progress is represented in one-minute units with sub-minute remainder discarded. citeturn392521search0
-
-This supports the architectural distinction between:
-
-```text
-live gameplay event packets
-```
-
-and:
-
-```text
-result/record/stat synchronization packets
-```
-
-but does not replace direct packet field evidence.
-
----
-
-## 12. Do not over-interpret these fields
-
-Still unresolved:
-
-```text
-225 EE8D38 exact public semantic
-227 EE8D3C exact public semantic
-233 EE8DAC exact lifetime accumulator semantic
-243/245 and 381–389 secondary u32 semantic
-exact Quest5/6 public labels
-exact 28–34 Quest public labels
-server-side generation rules for 223–245/381–389
-sequence/checksum/header/encryption outer framing
-```
-
-All unresolved fields remain raw `u32`/`2×u32` in the protocol spec.
+所有未知欄位維持 raw／`[OPEN]`，不得為 Server 實作方便而填入猜測值。
