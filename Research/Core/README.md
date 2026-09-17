@@ -62,7 +62,7 @@ Extracted/
 |---|---|
 | `Network_Protocol.md` | TCP/UDP transport、frame、codec、integrity/XOR、checksum、dispatcher 核心、UDP movement |
 | `UDP_Movement_Control_Evidence_2026-09-18.md` | UDP movement 雙向 serializer/parser、peer endpoint、control/recovery、153–164 symbol、BulletHole 交叉證據附錄 |
-| `Network_Dispatcher_Inventory.md` | `sub_58B010` 完整 TCP opcode → handler map、UDP peer/bootstrap evidence；不重複各封包 semantic |
+| `Network_Dispatcher_Inventory.md` | `sub_58B010` 完整 TCP opcode → handler inventory；不承載 packet/schema semantic |
 | `Login_ClientData_Protocol.md` | `680–696` + `197–221` login / MyInfo / ClientData wire protocol |
 | `Character_Inventory_Equipment.md` | Character、Appearance、Inventory、Weapon Loadout、Economy runtime/domain model |
 | `Room_GameRule_Mode.md` | Channel/Lobby/Room、Player/Slot/Team、Map、selector、Mode、GameRule lifecycle/rules |
@@ -142,4 +142,4 @@ Cross-domain abstraction → Server_State_Model
  └─ 否 → 先檢查 DOCUMENT_INDEX / AGENTS.md
 ```
 
-> `UDP_Movement_Control_Evidence_2026-09-18.md` 是針對 UDP movement/control 這條已經膨脹到需要獨立證據附錄的主線；其 semantic truth 仍受 `Network_Protocol.md` 統一約束，不另立第二套 packet schema。
+> `UDP_Movement_Control_Evidence_2026-09-18.md` 是 UDP movement/control 唯一深度證據附錄；不再建立 peer-handshake、correction、producer 等平行碎片。其 wire truth 統一受 `Network_Protocol.md` 約束。
