@@ -379,68 +379,411 @@ Client message table 與 handler registration 明確列出：
 160  TCP_UDP_DEAD_ACK
 ```
 
-`sub_5565D0()` 在 `PM_CONNECT_ACK (142)` 路徑會解析：string + u16 port + u8 flag + u32 value，最後呼叫 `sub_596E60()` 設定 UDP remote endpoint。[C]
+`sub_5565D0()` 在 `PM_CONNECT_ACK (142)` 路徑會解析：
+
+```text
+string
+u32 value
+u8 flag
+u32 configuration value
+```
+
+並呼叫 `sub_596E60(&unk_1326908, string, value)`；`u32 configuration value` 另外經 `sub_534F20(..., word_1D0D1F8)`，`u8 flag` 更新 `sub_417D00()` 所代表的 local byte state。[C]
+
+目前不能把 `u32 value` 僅依 Hex-Rays local 名稱直接定義成 `port`；它應保留為 bootstrap endpoint/config value，直到 `sub_596E60` 與其 constructor/consumer 再閉合。[C][OPEN]
 
 ### 4.2 UDP endpoint table
 
-UDP manager 內存在固定 **16 個 player entries**；`dword_F6DCF4[16]` 儲存每 entry 的 player/actor identity，而 `unk_F6D584[...]` 保存 16-byte endpoint data。程式不是單純「把玩家編號當 slot」：先用 identity 搜尋，再取得對應 entry。[C]
+UDP manager 內存在固定 **16 個 player entries**；`dword_F6DCF4[16]` 儲存每 entry 的 player/actor identity，而 `unk_F6D584[...]` 保存 16-byte endpoint/address data。程式不是單純「把玩家編號當 slot」：先用 identity 搜尋，再取得對應 entry。[C]
 
-`sub_594460()`（UDP opcode 10）接收 `u8 identity + 16-byte endpoint`，找到對應 player entry 後保存 endpoint，建立 opcode 13，並以 `sub_595980()` 對該 endpoint 發送 3 次。[C]
+`sub_594460()`（UDP opcode 10）接收：
 
-`sub_5946C0()`（UDP opcode 12）則一次接收 count 個 `u8 identity + 16-byte endpoint`，逐一建立 peer endpoint table，再對除自身以外的 active entries 發送 opcode 13。[C]
+```text
+u8 identity
+16-byte endpoint/address blob
+```
 
-`sub_593AB0()` / `sub_593E60()` 同樣讀取 identity + endpoint / identity + value 後建立 opcode 5/6，並透過 `sub_595980()` 對保存的 endpoint 進行點對點傳送。這是明確的 client-side peer-addressed UDP traffic 證據；是否要在 Server 文件稱作「P2P」仍應保留為架構描述，而不是把歷史玩家用語當 protocol 名稱。[C]
+找到對應 player entry 後保存 endpoint，建立 opcode 13，並以 `sub_595980()` 對該 endpoint 發送 3 次。[C]
 
-### 4.3 UDP 8/24 的方向性
+`sub_5946C0()`（UDP opcode 12）則一次接收 count 個：
 
-完整 UDP manager 的 outbound constructor 掃描中沒有 opcode `8` 或 `24` 的 Client-side packet constructor；`sub_595E80()` 的 inbound switch 反而把 `8`、`24` 都導向 `sub_596940()`，而 `sub_596940()` 明文名稱為 `OnY_UDP_S_MOVE_INF`。因此目前應正式記錄為：
+```text
+u8 identity + 16-byte endpoint/address blob
+```
+
+逐一更新 peer endpoint table，再對除自身以外的 active entries 發送 opcode 13。[C]
+
+### 4.3 Peer-addressed traffic
+
+`sub_595980()` 最終使用 WinSock `sendto()`，因此這些 packet 並非只走單一 connected UDP peer；呼叫端明確可以指定保存的對端 `sockaddr`。[C]
+
+`sub_593AB0()` 建立 opcode 5 時，也會對所有已登錄且非本地 identity 的 peer endpoint 做三次點對點送出；這些傳輸與 16-entry endpoint table 直接相連。[C]
+
+因此技術上可以確認：
+
+```text
+Client
+  -> 維護每 player 的 endpoint
+  -> 依 player identity 找 endpoint
+  -> 以 sendto(endpoint) 直接傳送
+```
+
+是否在歷史文件中把整個機制命名為「P2P」仍不應僅靠玩家用語判斷；目前安全名稱是 **peer-addressed UDP traffic / UDP sender architecture**。[C][OPEN]
+
+### 4.4 UDP peer handshake / maintenance family
+
+目前 direct C evidence 顯示 opcode `5/6/13/14` 都屬於這個 peer/address maintenance 子系統，但各自 payload semantic 尚不能合併：
+
+```text
+opcode 5
+  = identity/time-like local data
+    -> peer endpoints fan-out
+
+opcode 6
+  = endpoint/status related response
+    -> targeted peer
+
+opcode 13
+  = identity/time-like local data
+    -> active peer fan-out
+
+opcode 14
+  = endpoint/status related response
+    -> targeted peer
+```
+
+`sub_593AB0` 會把接收到的 identity 對應到 endpoint table 後建立 opcode 5；`sub_594460` / `sub_594A10` 則會在對應條件下建立 opcode 13 / 14；`sub_5941D0`、`sub_594DA0` 使用 3000 ms / 5000 ms timeout-like checks 判斷 peer state。[C][OPEN]
+
+這裡的「maintenance / handshake」是架構性描述，不是捏造的正式 protocol enum。
+
+### 4.5 UDP 8/24 的方向性
+
+完整 UDP manager 的 client-side constructor 搜尋沒有找到 opcode `8` 或 `24` 的 sender；`sub_595E80()` 的 inbound switch 反而把 `8`、`24` 都導向 `sub_596940()`，而 `sub_596940()` 明文名稱為：
+
+```text
+BUGCUDPNetworkManager::OnY_UDP_S_MOVE_INF
+```
+
+因此正式記錄為：
 
 ```text
 8 / 24
   = Server → Client inbound Y_UDP_S_MOVE_INF family
-  = Client-side exact sender [UNKNOWN]
+  = Client-side exact sender: 未在此 Client C 中找到
 ```
 
-不能再把「尋找 8/24 client sender」列為一般 client-side TODO；真正未知的是 server 端 producer／完整 counterpart，以及它如何產生 26-byte actor record。[C]
+未知部分是 server producer／完整 counterpart，而不是要求從 client C 虛構一個不存在的 sender。[C][OPEN]
 
-### 4.4 Packet direction 與 semantic 必須分離
+## 5. UDP Movement：26-byte Actor Record
 
-目前已能穩定分離：
+`sub_602E30()` 逐筆解析一個 actor snapshot。第一個 byte 是 actor count，之後每 actor 固定 26 bytes：[C]
 
 ```text
-TCP opcode 143/144  = PM_UDPSTART_REQ/ACK bootstrap
-UDP opcode 4/10/12   = endpoint distribution / endpoint registration family
-UDP opcode 5/6/13/14  = peer-addressed UDP responses/handshake family
-UDP opcode 8/24       = inbound Y_UDP_S_MOVE_INF
+R+00  u8   v28
+R+01  u8   v19
+R+02  u8   n16
+R+03  u32  v30
+R+07  u32  v16
+R+11  u8   v25[0]
+R+12  u16  v35
+R+14  u16  v36
+R+16  u16  v37
+R+18  u8   v23
+R+19  u8   v38
+R+20  u8   v14
+R+21  u8   v15[0]
+R+22  u8   n0x1C
+R+23  u32  v29
 ```
 
-但 4/5/6/10/12/13/14 每一個 payload 的 public semantic 仍必須個別追 parser/producer，不能因都「與 endpoint 有關」就合成一個 packet schema。[C][OPEN]
+```text
+payload
+= u8 actor_count
++ actor_count × 26-byte record
+```
 
-## 5. Evidence / Confidence
+### 5.1 Identity
+
+`R+02 n16` 會進：
+
+```text
+sub_67DF00(n16)
+sub_67D7D0(n16)
+```
+
+並在 valid range 內映射到 PlayerSlot-like runtime object；因此它是高度可信的 actor/player identity，但仍不應直接命名為 `SlotIndex`。[C][OPEN]
+
+### 5.2 Spatial vector
+
+```text
+R+12/R+14/R+16
+    -> / 3.0
+    -> 3D vector
+```
+
+這三個值確實是位置／空間量化資料；exact axis ordering、world origin 與 unit conversion 仍 `[OPEN]`。[C]
+
+### 5.3 `R+23 v29`：Resource/Action Identity
+
+這裡現在有比「event/sample value」更直接的證據。
+
+`sub_602E30()` 將 `v29` 作為 `sub_548E80(..., a2=v29, ...)` 的第二參數；而 `sub_548C80(this, a2)` 明確比較：
+
+```text
+sub_5F5500(..., L"BOMBPLANT")
+sub_5F5500(..., L"Pulp_A")
+sub_5F5500(..., L"Pulp_B")
+sub_5F5500(..., L"magic_finger")
+sub_5F5500(..., L"Escape")
+```
+
+此外還逐一比對 player 目前四個 weapon/resource block 的 identity 欄位。這表示 `v29` 的值域可以與 **Resource / Action identity** 直接比較，而不是任意 movement scalar。[C]
+
+因此目前 semantic 等級提升為：
+
+```text
+R+23
+  = Resource/Action Identity
+  confidence: Strongly Supported
+```
+
+更細的 namespace（例如是哪一個 runtime table、是否所有 action 都共用同一 namespace）仍 `[OPEN]`。
+
+### 5.4 `R+22 n0x1C`：PState / action-state candidate
+
+`sub_5B34B0(actor, v29, n0x1C, v38, v34, n16)` 會將 `n0x1C` 傳進 state transition path；`sub_5B3350` 會將它保存於 actor `+286`，並透過 `sub_7173E0(n0x1Ca)` 找對應 state description。`sub_5B75F0` 更直接對 `(n0x1C & 0x7F) == 8` 的 transition 做特殊處理。[C]
+
+因此目前比「generic state byte」更精確的安全命名是：
+
+```text
+R+22
+  = PState / action-state selector candidate
+```
+
+仍不能直接寫成某個完整 public enum；`sub_7173E0` 的 message mapping 主要提供 state description lookup，本身不足以證明所有 numeric values 的官方名稱。[C][OPEN]
+
+### 5.5 `R+11 v25[0]`
+
+`sub_5B3180(actor, v25[0])` 直接寫入 actor runtime `+233`，故它是真正的 actor state byte，不是 local padding。[C]
+
+其 exact enum semantic 尚 `[OPEN]`。
+
+### 5.6 `R+03/R+07` 與其他 byte fields
+
+以下暫時保持 conservative naming：
+
+```text
+R+03 v30    -> auxiliary state / transform-related u32 [OPEN]
+R+07 v16    -> snapshot scalar / movement-related u32 [OPEN]
+R+18 v23    -> controller/state byte [OPEN]
+R+19 v38    -> controller/state byte [OPEN]
+R+20 v14    -> controller/state byte [OPEN]
+R+21 v15    -> controller/state/raw byte [OPEN]
+```
+
+不能因排列位置或常見 FPS 協定習慣把它們自行命名成 jump/crouch/fire/stance。
+
+## 6. Actor-side downstream consumers
+
+每一筆 movement actor record 解析後會進入多層 state application：
+
+```text
+n16
+ ├─ sub_67DF00 / sub_67D7D0
+ └─ actor identity / PlayerSlot-like object
+
+v16 + (v35/v36/v37)/3
+ └─ sub_9BCB00
+    └─ snapshot/interpolation state
+
+v25[0]
+ └─ sub_5B3180
+    └─ actor +233 state byte
+
+v29 + n0x1C + v38 + v34 + n16
+ └─ sub_5B34B0
+    └─ action/state transition path
+
+v29
+ └─ sub_548E80
+    └─ resource/action whitelist test
+    └─ anomaly counter
+    └─ opcode 714 report after threshold
+```
+
+`sub_5E2570()` 也會以 `v29` 作為參數建立 event/effect-like runtime object；其內部先讀另一個 nested type byte，再依 1/2/3/4 建立不同 payload 形態，因此 `v29` 同時參與 movement-adjacent effect/state processing。[C][OPEN]
+
+## 7. Opcode 714：目前已知的 Client-side report path
+
+`sub_548E80()` 的條件鏈非常具體：
+
+```text
+if actor already reported
+    -> stop
+
+if a2 == 0
+or a2 == BOMBPLANT
+or a2 == Pulp_A/Pulp_B
+or a2 == magic_finger
+or a2 == Escape
+or a2 matches one of 4 equipped resource identities
+    -> suppress this path
+
+else
+    ++actor-local counter
+
+counter <= 40
+    -> no 714 packet
+
+counter > 40
+    -> construct TCP opcode 714
+```
+
+714 packet 的已確認欄位寫入順序為：
+
+```text
+u16 local/player identity      <- *sub_417D00()
+u16 state/local byte           <- a3
+u16 actor-local value          <- *(this + 240596)
+string                         <- *(this + 64)
+u32 Resource/Action Identity   <- a2
+```
+
+之後交給：
+
+```text
+sub_55D960
+  -> sub_555090(&dword_1321D00, packet)
+```
+
+所以目前最安全的 semantic 是：
+
+```text
+714 = client-side action/resource anomaly telemetry report
+```
+
+「anti-cheat」可以是合理架構解釋，但目前沒有 server receiver evidence 足以把它提升成正式命名。[C][OPEN]
+
+## 8. UDP periodic / health traffic
+
+`sub_596180()`：
+
+```text
+每 >= 1000 ms
+→ opcode 17
+→ local UDP socket
+```
+
+`sub_596670()`：
+
+```text
+每約 500 ms
+→ opcode 19
+→ peer-addressed UDP path
+```
+
+opcode 19 的 body 至少包含 local identity、local byte state、mode-like byte、u32 state、localized/string payload；存在 retry/count-like state 與 escalation path。不能直接稱為普通 heartbeat。[C][OPEN]
+
+`sub_5934B0()` / `sub_593510()` 還存在 30000 ms timeout path，條件成立時產生 TCP opcode 697；697 的完整 server semantic 仍 `[OPEN]`。
+
+## 9. PM_CONNECT / PM_UDPSTART 與 peer table 的關係
+
+目前可以穩定建模成：
+
+```text
+TCP 141/142 PM_CONNECT
+    ↓
+建立 / 更新 Client-side UDP endpoint 基礎設定
+    ↓
+TCP 143/144 PM_UDPSTART
+    ↓
+取得 / 啟動 gameplay UDP context
+    ↓
+UDP peer endpoint distribution
+    ↓
+16-entry identity → endpoint table
+    ↓
+peer-addressed UDP traffic
+    ↓
+UDP movement / gameplay transport
+```
+
+但 `141/142/143/144` 的完整 field-by-field conversion、server-side endpoint generation 以及每個 peer opcode 的正式 enum 還需要繼續從 producer/consumer 閉合。[C][OPEN]
+
+## 10. Evidence / Confidence
 
 | 結論 | 等級 | 原因 |
 |---|---|---|
 | `sub_58B010` 有 306 個 explicit cases | Confirmed | 完整 `PaperMan.exe.c` switch 全檔掃描 |
-| 141/142/143/144 是 PM connect/UDP bootstrap 命名 | Confirmed | handler registration 與 message-table/resource strings 同時出現 |
-| UDP 使用 16-entry player identity → endpoint table | Confirmed | 4/10/12 parser、16 次迴圈、identity lookup、endpoint store 都直接出現 |
-| UDP 存在 client-side peer-addressed send | Confirmed | `sub_595980` → `sendto` + stored endpoint |
+| 141/142/143/144 是 PM connect/UDP bootstrap 命名 | Confirmed | handler registration 與 protocol/resource strings 同時出現 |
+| UDP 使用 16-entry player identity → endpoint table | Confirmed | identity lookup、16 次迴圈、endpoint store、point-to-point send |
+| UDP 存在 client-side peer-addressed send | Confirmed | `sub_595980` 最終呼叫 `sendto` |
 | 8/24 是 inbound `Y_UDP_S_MOVE_INF` | Confirmed | inbound switch + `OnY_UDP_S_MOVE_INF` 明文名稱 |
-| 8/24 的 server-side producer | Unknown | client-only C 無法直接看到 server producer |
-| 「完整 P2P 協定」的歷史命名 | Unknown | 技術上已證明 endpoint-addressed traffic，但完整外部協定語意仍需更多證據 |
+| movement actor record = 26 bytes | Confirmed | `sub_602E30` 實際 parser read widths |
+| movement R+23 = Resource/Action Identity | Strongly Supported | `sub_548C80` 與 action/resource identities 直接比對 |
+| R+22 = PState/action-state selector candidate | Strongly Supported | `sub_5B34B0` → `sub_5B3350` → state lookup/transition |
+| opcode 714 是 client-side anomaly telemetry report | Strongly Supported | explicit threshold + suppressed action whitelist + concrete packet construction |
+| 714 server-side semantic | Unknown | client C 中未找到 receiver counterpart |
+| 「完整 P2P 協定」歷史命名 | Unknown | 已證明 endpoint-addressed traffic，但完整外部協定仍未完全閉合 |
 
-## 6. 目前真正 OPEN
+## 11. 目前真正 OPEN
 
 ```text
 TCP dispatcher 每個 handler 的 semantic 尚未全部閉合
+
 UDP opcode 4/5/6/10/12/13/14 的完整 payload schema
 UDP peer endpoint value 的 server 產生流程
 UDP 8/24 server-side producer 與 26-byte record serializer
 TCP header +0x06 與完整 transform/compression 條件
 165/166 全 subtype payload 與 server validation contract
-714 counterpart
+714 server receiver/counterpart
+movement R+00/R+01/R+03/R+07/R+11/R+18/R+19/R+20/R+21 的 exact semantic
+movement R+02 identity namespace 的 exact conversion
+R+12/R+14/R+16 exact axis/unit encoding
+R+23 exact Resource/Action namespace
+sub_5E2570 nested event/effect object 的完整 type/value schema
 ```
 
-## 7. 相關主文件
+## 12. 後續最高價值追查順序
+
+```text
+A. sub_59E4F0 / sub_59A590 / sub_5E2570
+   → close movement-adjacent event/effect object
+
+B. sub_548E80 / opcode 714 receiver search
+   → close action/resource anomaly report
+
+C. UDP peer opcode 4/5/6/10/12/13/14
+   → exact byte schema + producer/consumer pairing
+
+D. all consumers of movement R+00/R+01/R+03/R+07/R+11/R+18..R+21
+   → formalize movement fields
+
+E. n16 → sub_67D7D0 → exact actor identity namespace
+
+F. 165/166 subtype pairs
+   → complete gameplay event schema
+
+G. itemdata.pat category-specific fields
+   → close static ItemDefinition
+
+H. TCP header +0x06 / transform
+   → close outer protocol
+```
+
+## 13. Evidence discipline
+
+```text
+[C]     IDA C direct evidence
+[RES]   Extracted resource evidence
+[WIKI]  Wiki / player-observable historical behavior
+[X]     at least two independent evidence classes agree
+[OPEN]  unresolved; do not silently replace with 0 or invented enum
+```
+
+Parser/serializer implementation has priority over Hex-Rays guessed local types. Resource definitions, runtime state, and network wire layouts must remain distinct until a conversion path is directly established.
+
+## 14. 相關主文件
 
 ```text
 Network_Protocol.md
@@ -448,5 +791,7 @@ Login_ClientData_Protocol.md
 Room_Channel_GameRule_101_221_Field_Evidence.md
 Gameplay_Combat.md
 Result_Quest_Stats.md
+Character_Inventory_Equipment.md
+Resource_Pack_Model.md
 Server_State_Model.md
 ```
