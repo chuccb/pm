@@ -2,19 +2,23 @@
 
 > 目標版本：日本版 PaperMan 2016 年服務終了時的最終 Client。
 
-本儲存庫保存 PaperMan 最終版 Client 的逆向研究資料、完整遊戲資源、IDA 反編譯結果，以及依據 Client、`Extracted/` 與日本 Wiki 交叉驗證後形成的研究文件。
+本儲存庫保存 PaperMan 最終版 Client 的逆向研究資料、完整遊戲資源、IDA 反編譯結果，以及從 Client、`Extracted/` 與日本 PaperMan Wiki 交叉驗證得到的研究結果。
 
 ## 研究入口
 
-- [研究總覽](Research/README.md)
-- [完整文件索引](Research/DOCUMENT_INDEX.md)
-- [核心遊戲機制](Research/Core/README.md)
-- [Kick Vote](Research/KickVote/README.md)
-- [文件與研究規範](AGENTS.md)
+閱讀順序固定為：
+
+1. [研究與維護規則](AGENTS.md)
+2. [研究總覽](Research/README.md)
+3. [完整文件索引](Research/DOCUMENT_INDEX.md)
+4. [核心遊戲機制](Research/Core/README.md)
+5. [Kick Vote](Research/KickVote/README.md)
+
+GitHub Copilot／Coding Agent 另有 [Copilot 研究規則](.github/copilot-instructions.md)，內容不得與 `AGENTS.md` 分叉。
 
 ## 證據來源
 
-研究結論以以下來源互相驗證，而不是只依賴單一來源：
+研究結論不以單一來源為準：
 
 - `PaperMan.exe`：原始 Client。
 - `PaperMan.exe.c`：IDA / Hex-Rays 反編譯輸出。
@@ -24,8 +28,14 @@
 
 ## 文件原則
 
-所有 Markdown 的說明文字、標題、表格與註解一律使用**繁體中文**。程式碼、封包名稱、函式名稱、變數名稱、檔案路徑、API 名稱、正式產品名稱及必要的原文內容可維持原樣。
+所有 Markdown 的一般說明文字、標題、表格與註解一律使用繁體中文。程式碼、封包名稱、函式名稱、變數名稱、檔案路徑、API、外部識別字與必要的原文證據可維持原樣。
 
-研究文件必須清楚區分「直接證據」、「交叉推導」與「尚未確認」。禁止把推測當成已確認協定，也禁止以方便實作為由替未知欄位任意填入數值。
+同一概念只能有一份主要真相。新增文件前必須先搜尋既有研究；能更新舊文件就不要建立副本。所有研究 Markdown 都必須出現在 `Research/DOCUMENT_INDEX.md`。
 
-文件新增、修改或合併後，必須同步維護 `Research/DOCUMENT_INDEX.md`；不要為同一概念建立第二份平行真相。
+研究證據必須區分 `[C]`、`[RES]`、`[WIKI]`、`[X]` 與 `[OPEN]`。Packet 欄位要盡可能從 serializer／parser、caller／callee、實際讀寫寬度、state field、資源與 Wiki 交叉確認；未知欄位不得為了讓 Server 編譯而偷偷填入 `0` 或固定值。
+
+文件修改後執行：
+
+```text
+python scripts/check_markdown.py
+```
