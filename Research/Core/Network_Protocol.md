@@ -4,6 +4,30 @@
 > 更新基準：2026-09-17。
 > 文件責任：將 TCP/UDP transport、frame framing、integrity/transform、共用 codec、packet submission、opcode registration 與 dispatcher 集中於同一網路主文件。特定 opcode 的完整 payload semantic 仍由各遊戲領域章節或主文件維護。
 
+## 先看這裡：這份文件回答什麼
+
+如果問題是「封包怎麼進出 Client、TCP/UDP 怎麼分、frame 怎麼組、哪裡 dispatch」，看這份文件。
+
+如果問題是「某個 opcode 的欄位語意」，沿著 dispatcher 找到對應領域文件，不要在這裡建立第二份 payload schema。
+
+最短理解路徑：
+
+```text
+Socket / stream
+  ↓
+Frame
+  ↓
+Integrity / XOR
+  ↓
+Packet
+  ↓
+Dispatcher
+  ↓
+Opcode handler
+  ↓
+State / gameplay
+```
+
 ## 1. 研究範圍與分層
 
 本文件整合原本分散的：
