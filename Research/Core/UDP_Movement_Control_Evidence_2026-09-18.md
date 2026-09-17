@@ -2,7 +2,7 @@
 
 > 研究日期：2026-09-18。
 > Target：日本版 PaperMan 2016 年服務終了時的最終 Client。
-> 本文件是 `Network_Protocol.md` 的深度證據附錄：集中保存 UDP movement、peer/control-plane、recovery 與 BulletHole 交叉驗證；Packet／crypto canonical truth 仍以 `Network_Protocol.md` 為準。
+> 本文件是 `Network_Protocol.md` 的唯一 UDP movement/control 深度證據附錄：集中保存跨函式、state、peer/bootstrap、recovery 與 Resource 交叉驗證；Packet／crypto 的 canonical wire truth 仍以 `Network_Protocol.md` 為準。
 
 ## 1. 最重要的結論
 
@@ -167,8 +167,8 @@ R+12  u8   controller/state byte            [OPEN]
 R+13  u8   controller/state byte            [OPEN]
 R+14  u8   controller/state byte            [OPEN]
 R+15  u8   controller/state byte            [OPEN]
-R+16  u8   generic state/action selector    [Strongly Supported]
-R+17  u32  Resource/Action identity cand.   [Strongly Supported]
+R+16  u8   StateCode / state-transition selector [Strongly Supported]
+R+17  u32  WeaponNum / GunIndex candidate       [Strongly Supported]
 ```
 
 `R+02` 進 `sub_67DF00()` / `sub_67D7D0()`，並在 `<16` remote-slot domain 內取得 actor/player runtime object；因此高度支持 identity，但 exact public namespace 仍 `[OPEN]`。[C]
@@ -289,7 +289,7 @@ sub_602D70
 +14  u8   derived/directional state
 +15  u8   this+848
 +16  u8   derived movement/action state
-+17  u32  sub_5AA5C0(n9)
++17  u32  sub_5AA5C0(n9)  // WeaponNum / GunIndex
 ```
 
 總長 **27 bytes**。[C]
@@ -568,7 +568,17 @@ thresholds：
 
 ---
 
-## 12. UDP recovery / health
+## 12. UDP bootstrap / recovery / health
+
+TCP bootstrap：
+```
+141 PM_CONNECT_REQ
+142 PM_CONNECT_ACK
+143 PM_UDPSTART_REQ
+144 PM_UDPSTART_ACK
+```
+
+`sub_5565D0()` 處理 142 時建立/更新 UDP endpoint-related setup；`sub_555C60()` 建立 143。完整 144 body 仍未完全閉合，因此只保留已證實的 registration / transition，不自行補欄位。[C]
 
 UDP opcode 18：
 
@@ -678,6 +688,8 @@ protocol names 155/156 exist
 | opcode 155/156 correlate with BulletHole resource family | Strongly Supported | symbol registration + resource family |
 | 8/24 server-side producer | Unknown | absent from Client binary |
 | opcode 23 formal public name | Unknown | symbol closure missing |
+| R+16 has internal StateCode mapping | Confirmed | sub_5B76A0 switch |
+| R+17 maps into CGunDataCtrl index domain | Strongly Supported | sub_5B35F0 + sub_5F5400/sub_5F5450 |
 | exact movement field semantics beyond closed relations | Mostly OPEN | insufficient independent evidence |
 | peer timing field exact semantics | Unknown | remote value not consumed by response construction |
 
@@ -689,7 +701,7 @@ protocol names 155/156 exist
 A. Movement R+00/R+01/R+03/R+07/R+12/R+13/R+14/R+15 exact semantic
 B. Movement R+02 exact identity namespace
 C. Movement R+16 complete non-Emotion state/action enum
-D. Movement R+17 exact Resource/Action namespace
+D. Movement R+17 exact weapon / CGunData public namespace
 E. sub_5E2570 type 1/2/3/4 exact public event mapping
 F. UDP 8/24 server-side serializer
 G. UDP 23 formal protocol name
