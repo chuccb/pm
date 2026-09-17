@@ -94,14 +94,13 @@ Extracted 資源
 
 - [`Combat_Hit_Detection.md`](Combat_Hit_Detection.md)：命中判定與戰鬥事件。
 - [`Damage_Calculation.md`](Damage_Calculation.md)：傷害計算與相關狀態。
-- [`Y_TCP_INF_Damage.md`](Y_TCP_INF_Damage.md)：`Y_TCP_INF` 傷害鏈與資料流。
+- [`Y_TCP_INF_Damage.md`](Y_TCP_INF_Damage.md)：`Y_TCP_INF` 165/166 全 family、handler 與 state 證據。
 - [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md)：UDP 8/24、Queue、27-byte actor record 與欄位證據。
 - [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：丟棄武器封包與流程。
 
 ### Packet、Result、Score 與 Quest
 
-- [`Packet_166_Field_Map.md`](Packet_166_Field_Map.md)：`166` 欄位總表與位置對照。
-- [`Packet_166_Field_Detail_3_15.md`](Packet_166_Field_Detail_3_15.md)：`166` 3–15 欄位深入細節。
+- [`Packet_166_Field_Map.md`](Packet_166_Field_Map.md)：`166` 欄位總表與位置對照；完整證據回到 `Gameplay_166_DeepEvidence.md`。
 - [`TCP_269_Subtype7_Field_Detail.md`](TCP_269_Subtype7_Field_Detail.md)：`269 subtype 7` 完整欄位、玩家同步與 Result/K/D 狀態。
 - [`Quest_Result_Packets_223_245.md`](Quest_Result_Packets_223_245.md)：`223–245` Quest/Result 封包。
 - [`Result_Stat_Protocol_223_245_381_389.md`](Result_Stat_Protocol_223_245_381_389.md)：`223/245/381/389` Result/Stat 協定。
