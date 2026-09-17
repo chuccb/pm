@@ -90,7 +90,7 @@ Extracted 資源
 - [`Gameplay_Network_Events.md`](Gameplay_Network_Events.md)：Gameplay network event 與事件鏈。
 - [`Gameplay_166_DeepEvidence.md`](Gameplay_166_DeepEvidence.md)：`166` Gameplay、死亡、K/D、結果與相關深入證據。
 
-### 戰鬥、移動與武器
+### 戰鬥、移動、武器與 Y_TCP_INF
 
 - [`Combat_Hit_Detection.md`](Combat_Hit_Detection.md)：命中判定與戰鬥事件。
 - [`Damage_Calculation.md`](Damage_Calculation.md)：傷害計算與相關狀態。
@@ -102,13 +102,11 @@ Extracted 資源
 
 - [`Packet_166_Field_Map.md`](Packet_166_Field_Map.md)：`166` 欄位總表與位置對照；完整證據回到 `Gameplay_166_DeepEvidence.md`。
 - [`TCP_269_Subtype7_Field_Detail.md`](TCP_269_Subtype7_Field_Detail.md)：`269 subtype 7` 完整欄位、玩家同步與 Result/K/D 狀態。
-- [`Quest_Result_Packets_223_245.md`](Quest_Result_Packets_223_245.md)：`223–245` Quest/Result 封包。
-- [`Result_Stat_Protocol_223_245_381_389.md`](Result_Stat_Protocol_223_245_381_389.md)：`223/245/381/389` Result/Stat 協定。
-- [`Score_State.md`](Score_State.md)：Score 與計分狀態。
+- [`Result_Stat_Protocol_223_245_381_389.md`](Result_Stat_Protocol_223_245_381_389.md)：`223–245`、`381–389` Result／Stat／Quest 主文件。
 
 ### Quest、Event、Resource
 
-- [`Quest_Event_ID_Mapping.md`](Quest_Event_ID_Mapping.md)：Quest/Event 與 ID mapping。
+- [`Quest_Event_ID_Mapping.md`](Quest_Event_ID_Mapping.md)：Quest/Event 與 ID mapping 字典。
 - [`Resource_Pack_Model.md`](Resource_Pack_Model.md)：遊戲資源封裝與資料模型。
 
 完整文件清單與角色分類以 [`../DOCUMENT_INDEX.md`](../DOCUMENT_INDEX.md) 為準。
