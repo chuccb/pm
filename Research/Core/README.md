@@ -15,11 +15,11 @@
     ↓
 Channel／Lobby／Room／Player／GameRule
     ↓
-遊戲模式／Gameplay
+遊戲模式／規則／Selector
     ↓
-戰鬥／移動／武器
+Gameplay／165/166／Combat／Movement
     ↓
-Result／Quest／Resource
+Result／Score／Quest／Resource
 ```
 
 主要研究方法固定為：
@@ -41,11 +41,12 @@ Login
   → Channel / Lobby
   → Room
   → Player / Slot / Team
+  → Room settings
   → Ready
   → Start
   → Match 初始化
   → Gameplay / Round
-  → Result
+  → Result / Quest
   → Leave / End
   → Room / Lobby
 ```
@@ -54,56 +55,51 @@ Login
 
 ### 網路／傳輸／Dispatcher
 
-- [`Network_Protocol.md`](Network_Protocol.md)：TCP/UDP transport、frame、integrity/XOR、checksum、共用 codec、submission、opcode registration 與 dispatcher。原本的 `Foundation_TCP_Handshake_Login_Protocol.md`、`Network_Dispatch.md`、`Y_TCP_INF_Transport.md` 已整合於此。
+- [`Network_Protocol.md`](Network_Protocol.md)：TCP/UDP transport、frame、integrity/XOR、checksum、共用 codec、submission、opcode registration 與 dispatcher。
 
-### 登入／ClientData／玩家資料
+### Channel／Lobby／Room／Player／Map／GameRule
 
-- [`Login_Adjacent_680_696_Field_Schema.md`](Login_Adjacent_680_696_Field_Schema.md)：`680–696` 登入鄰近協定與 `681` server-list 結構。
-- [`MyInfo_198_ClientData_Field_Schema.md`](MyInfo_198_ClientData_Field_Schema.md)：`198` composite 順序、MyInfo／Avatar hydration 與未閉合欄位。
-- [`ClientData_Shared_Decoder_Field_Evidence.md`](ClientData_Shared_Decoder_Field_Evidence.md)：ClientData 共用 wire family、record schema、decoder/serializer 與 Resource validation。
-- [`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md)：Character、Inventory、Equipment、Weapon 與 Runtime 資料模型。
-- [`Currency_State_Field_Evidence.md`](Currency_State_Field_Evidence.md)：PG、CASH、CP 與經濟欄位證據。
+- [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md)：同一大方向的主要主文件，集中 Channel → Lobby → Room、16-slot Player、Team/Group、Map、Room selector 與 CGameRule 生命週期。
+- [`Room_Channel_GameRule_101_192_Field_Evidence.md`](Room_Channel_GameRule_101_192_Field_Evidence.md)：`101–192` 精確 packet／parser／serializer／field evidence。
+- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` 精確 top-level packet／parser／serializer／field evidence。
+- [`Room_Settings_Packets.md`](Room_Settings_Packets.md)：Room selector/value 與設定 packet 的詳細資料流。
+- [`Server_State_Model.md`](Server_State_Model.md)：跨整個 Server reconstruction 的 state abstraction。
 
-### Channel／Lobby／Room／Player／GameRule
+`Channel_Lobby_Lifecycle.md`、`Player_Slot_Team.md`、`Map_And_Room.md` 已整合；`GameRule_Lifecycle.md` 的研究內容也已集中至 `Room_Lobby_GameRule.md`，舊檔只應視為遷移殘留，不得重新加入第二套研究結論。
 
-- [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md)：Channel → Lobby → Room、Player Slot／Team、Map、Room selector 與 CGameRule 生命週期的大方向主文件。
-- [`Room_Channel_GameRule_101_192_Field_Evidence.md`](Room_Channel_GameRule_101_192_Field_Evidence.md)：`101–192` 精確 packet、parser、serializer 與欄位證據。
-- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` 精確 top-level packet evidence。
-- [`Room_Settings_Packets.md`](Room_Settings_Packets.md)：Room selector/value、設定封包與 UI data-flow 的詳細證據。
-- [`Server_State_Model.md`](Server_State_Model.md)：跨子系統 Server reconstruction 抽象模型。
+### 遊戲模式／規則／Selector
 
-`GameRule_Lifecycle.md`、`Channel_Lobby_Lifecycle.md`、`Map_And_Room.md`、`Player_Slot_Team.md` 的大方向內容已整合至 `Room_Lobby_GameRule.md`；舊檔已移除或僅保留必要遷移痕跡，不再作為研究主文件。
+- [`Mode_Rules_And_Options.md`](Mode_Rules_And_Options.md)：各模式玩家可見規則、Client mode builder、OptionIndex／OptionValue、具體 selector values、版本差異與 Runtime 待閉合項目。
 
-### Gameplay／戰鬥／移動／武器
+### Gameplay／Y_TCP_INF／Combat／Movement
 
-- [`Mode_Rules.md`](Mode_Rules.md)：遊戲模式規則與版本差異。
-- [`Mode_Option_Tables.md`](Mode_Option_Tables.md)：mode-specific selector index/value。
-- [`Gameplay_166_DeepEvidence.md`](Gameplay_166_DeepEvidence.md)：`166` Gameplay event family 深入證據。
-- [`Y_TCP_INF_Damage.md`](Y_TCP_INF_Damage.md)：`165/166 Y_TCP_INF` gameplay/event family。
-- [`Combat_Damage.md`](Combat_Damage.md)：Hit Detection、Combat geometry、Damage modifier 與 `165` 建包前計算的整合主文件。
+- [`Gameplay_Network.md`](Gameplay_Network.md)：`165/166 Y_TCP_INF` gameplay event family、166 subtype、Resource/state application、sender/receiver 與 165/166 K/D 邊界。
+- [`Combat_Damage.md`](Combat_Damage.md)：Hit Detection、2D/3D combat geometry、Damage modifier、165 建包前計算。
 - [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md)：UDP movement actor record 與欄位證據。
-- [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：丟棄／拾取武器流程。
+- [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：武器丟棄／拾取事件與流程。
 
-`Combat_Hit_Detection.md` 與 `Damage_Calculation.md` 已整合至 `Combat_Damage.md`，不再作為獨立主文件。
+`Gameplay_166_DeepEvidence.md`、`Y_TCP_INF_Damage.md`、`Packet_166_Field_Map.md` 已整合至 `Gameplay_Network.md`；`Combat_Hit_Detection.md` 與 `Damage_Calculation.md` 已整合至 `Combat_Damage.md`。
 
-### Result／Quest／Resource
+### Result／Score／Quest／Event／Resource
 
-- [`Packet_166_Field_Map.md`](Packet_166_Field_Map.md)：`166` 欄位快速索引。
-- [`TCP_269_Subtype7_Field_Detail.md`](TCP_269_Subtype7_Field_Detail.md)：`269 subtype 7` 完整欄位與 Result/K/D state。
-- [`Result_Stat_Protocol_223_245_381_389.md`](Result_Stat_Protocol_223_245_381_389.md)：Result、Stat、Quest 相關 packet。
-- [`Quest_Event_ID_Mapping.md`](Quest_Event_ID_Mapping.md)：Quest/Event ID mapping。
+- [`Result_Quest_Stats.md`](Result_Quest_Stats.md)：Result、Score/K-D、長期統計、Quest condition、Assist／Football 等相關事件的整合主文件。
+- [`TCP_269_Subtype7_Field_Detail.md`](TCP_269_Subtype7_Field_Detail.md)：`269 subtype 7` 詳細欄位與 Result/K-D state。
 - [`Resource_Pack_Model.md`](Resource_Pack_Model.md)：Resource pack、資料模型與 loader/runtime 邊界。
+
+`Result_Stat_Protocol_223_245_381_389.md`、`Quest_Event_ID_Mapping.md` 已整合至 `Result_Quest_Stats.md`。
 
 ## 文件整理原則
 
-同一大方向優先使用同一主文件；只有在資料量、證據性質或責任確實不同時才保留獨立文件。
+同一大方向優先使用同一主文件；只有在資料量、證據性質或責任確實不同，且無法無損放入既有主文件時，才保留獨立文件。
 
 新增文件前先回答：
 
 ```text
-這是不是既有大方向主文件應該承載的內容？
+1. 它屬於哪個大方向？
+2. 既有大方向主文件為何不能直接承載？
+3. 是否會形成第二份 Packet／State／Semantic 真相？
 ```
 
-若答案是「是」，直接更新既有主文件，不建立副本。
+若只是新的證據、欄位、caller、Resource 對照或 OPEN 項目，原則上直接更新既有主文件。
 
 完整文件清單以 [`../DOCUMENT_INDEX.md`](../DOCUMENT_INDEX.md) 為準；儲存庫級規則以 [`../../AGENTS.md`](../../AGENTS.md) 為準。
