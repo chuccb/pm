@@ -50,32 +50,31 @@
 | [Core/GameRule_Lifecycle.md](Core/GameRule_Lifecycle.md) | GameRule 生命週期與狀態機 |
 | [Core/Server_State_Model.md](Core/Server_State_Model.md) | Server-side 狀態模型與同步關係 |
 
-## 五、遊戲模式與模式設定
+## 五、遊戲模式與 Gameplay
 
 | 文件 | 定位 |
 |---|---|
 | [Core/Mode_Rules.md](Core/Mode_Rules.md) | 各遊戲模式的規則與狀態 |
 | [Core/Mode_Option_Tables.md](Core/Mode_Option_Tables.md) | 模式選項與欄位對照表 |
-| [Core/Gameplay_166_DeepEvidence.md](Core/Gameplay_166_DeepEvidence.md) | `166` Gameplay、死亡、K/D、結果與相關深入證據 |
+| [Core/Gameplay_166_DeepEvidence.md](Core/Gameplay_166_DeepEvidence.md) | `166` 完整 Gameplay、死亡、K/D、欄位與跨函式證據 |
 | [Core/Gameplay_Network_Events.md](Core/Gameplay_Network_Events.md) | Gameplay network event 與事件鏈 |
 
-## 六、戰鬥、傷害、移動與武器
+## 六、戰鬥、移動與武器
 
 | 文件 | 定位 |
 |---|---|
 | [Core/Combat_Hit_Detection.md](Core/Combat_Hit_Detection.md) | 命中判定與戰鬥事件 |
 | [Core/Damage_Calculation.md](Core/Damage_Calculation.md) | 傷害計算與相關狀態 |
-| [Core/Y_TCP_INF_Damage.md](Core/Y_TCP_INF_Damage.md) | `Y_TCP_INF` 傷害鏈與資料流 |
+| [Core/Y_TCP_INF_Damage.md](Core/Y_TCP_INF_Damage.md) | `Y_TCP_INF` 165/166 全 family、handler 與 state 證據 |
 | [Core/UDP_Move_Inf_DeepEvidence.md](Core/UDP_Move_Inf_DeepEvidence.md) | UDP 8/24、Queue、27-byte actor record 與欄位證據 |
 | [Core/DropWeapon_Protocol.md](Core/DropWeapon_Protocol.md) | 丟棄武器封包與流程 |
 
-## 七、Packet 欄位細節與結果協定
+## 七、Packet、Result、Score 與 Quest
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Packet_166_Field_Map.md](Core/Packet_166_Field_Map.md) | `166` 欄位總表與位置對照 |
-| [Core/Packet_166_Field_Detail_3_15.md](Core/Packet_166_Field_Detail_3_15.md) | `166` 3–15 欄位深入細節 |
-| [Core/TCP_269_Subtype7_Field_Detail.md](Core/TCP_269_Subtype7_Field_Detail.md) | `269 subtype 7` 完整欄位、玩家同步與 Result/K/D 狀態 |
+| [Core/Packet_166_Field_Map.md](Core/Packet_166_Field_Map.md) | `166` 欄位快速索引，完整證據回到 Gameplay 主文件 |
+| [Core/TCP_269_Subtype7_Field_Detail.md](Core/TCP_269_Subtype7_Field_Detail.md) | `269 subtype 7` 完整欄位、玩家同步與 Result/K-D 狀態 |
 | [Core/Quest_Result_Packets_223_245.md](Core/Quest_Result_Packets_223_245.md) | `223–245` Quest/Result 封包 |
 | [Core/Result_Stat_Protocol_223_245_381_389.md](Core/Result_Stat_Protocol_223_245_381_389.md) | `223/245/381/389` Result/Stat 協定 |
 | [Core/Score_State.md](Core/Score_State.md) | Score 與計分狀態 |
@@ -97,17 +96,16 @@
 | [KickVote/UI_State.md](KickVote/UI_State.md) | 投票 UI、狀態機、計時器與候選清單 |
 | [KickVote/Master_Room.md](KickVote/Master_Room.md) | `396/397` Master/Room 層協定 |
 
-## 十、整合規則
-
-同一主題應有一份主文件。深入證據、欄位表、生命週期與協定內容只有在責任真正不同時才拆分；不得因研究角度不同而複製整份結論。
-
-本輪已完成的整合：
+## 十、已完成的內容整合
 
 ```text
 Character_Inventory_Equipment_DeepEvidence.md
     → Character_Inventory_Equipment.md
 
 Gameplay_166_KD_Field_Evidence.md
+    → Gameplay_166_DeepEvidence.md
+
+Packet_166_Field_Detail_3_15.md
     → Gameplay_166_DeepEvidence.md
 
 UDP_Move_Inf_Field_Semantics.md
@@ -121,15 +119,32 @@ MyInfo_198_Composite_Codec_Evidence.md
 
 Login_681_Server_Record_Field_Schema.md
     → Login_Adjacent_680_696_Field_Schema.md
+
+Y_TCP_INF_Handler_Details.md
+    → Y_TCP_INF_Damage.md
 ```
 
-原文件刪除前，內容必須已逐項保留；未知欄位、反證與 `[OPEN]` 不得在整合過程中消失。
+整合時保留證據、反證、欄位寬度、函式路徑與 `[OPEN]` 邊界；禁止用摘要取代完整研究。
 
-## 十一、禁止再次失控
+## 十一、文件角色與單一真相
+
+同一主題應有一份主文件。只有責任真正不同時才拆分：
+
+```text
+主題結論／深入證據 → 主題主文件
+欄位速查 → Field Map／Schema
+生命週期 → Lifecycle
+傳輸底層 → Transport
+專題導航 → README
+```
+
+任何新文件都必須先回答：「為什麼不能更新現有主文件？」若無合理答案，就不要新增。
+
+## 十二、禁止再次失控
 
 - 同一 Packet 出現多份不同欄位真相。
 - 建立 `New`、`Final`、`Final2`、`Latest`、`Copy` 等副本。
 - 把猜測改成 confirmed 而沒有新證據。
 - 把其它版本／地區資料無標記混入 2016 Japan final Client。
 - 只更新子文件，不同步主文件、入口與索引。
-- 新增 Markdown 時使用簡體中文說明文字。
+- 使用簡體中文或英文句子撰寫新的 Markdown 一般說明。
