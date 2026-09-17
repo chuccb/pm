@@ -2,7 +2,7 @@
 
 > 研究日期：2026-09-17。
 > 目標版本：日本版 PaperMan 2016 年結束營運時的最終 Client。
-> 文件角色：只保存跨 Packet／跨子系統的 Server reconstruction 抽象模型，不重新複製單一封包欄位或單一功能文件的詳細證據。
+> 文件角色：只保存跨 Packet／跨子系統的 Server reconstruction 抽象模型，不重新複製單一封包欄位或單一功能的詳細證據。
 
 ## 先看這裡：這份文件回答什麼
 
@@ -12,10 +12,10 @@
 
 ```text
 Packet wire layout
-    → 對應的 Protocol / Schema / Field Evidence
+    → 對應 Protocol / Schema / Field Evidence
 
-單一功能的 C / LST 證據
-    → 對應的功能研究文件
+單一功能 C / LST 證據
+    → 對應該功能的研究文件
 
 跨域 Server graph
     → 本文件
@@ -34,12 +34,12 @@ MatchRuntime
   ↓
 Gameplay / Result
   ↓
-Profile / Economy
+Profile / Inventory / Economy
 ```
 
 ## 1. 模型原則
 
-Server reconstruction 必須嚴格區分：
+嚴格區分：
 
 ```text
 Client runtime field
@@ -49,7 +49,7 @@ wire field
 server semantic field
 ```
 
-因此未知欄位保持：
+未知欄位保持：
 
 ```text
 unknown_*
@@ -60,9 +60,7 @@ packed_flags
 
 只有跨來源證據真正閉合後才升級 public semantic。
 
-## 2. Server 的核心邊界
-
-目前最小可行抽象：
+## 2. Server 核心邊界
 
 ```text
 GameServer
@@ -71,24 +69,15 @@ GameServer
 └─ MatchRuntime[]
 ```
 
-三者責任不同：
-
 ```text
-Session
-    = connection / identity / current room
-
-Room
-    = lobby/game-room configuration + player slots
-
-MatchRuntime
-    = in-game mode / round / objective / result state
+Session      = connection / identity / current room
+Room         = room configuration + player slots
+MatchRuntime = in-game mode / round / objective / result
 ```
 
-不能把三者壓成單一 `Player` 或單一 connection state。
+三者不可壓成單一 `Player` 或 connection state。
 
 ## 3. Session
-
-最小模型：
 
 ```text
 Session
@@ -98,57 +87,41 @@ Session
 └─ ConnectionState
 ```
 
-Client evidence 明確要求 Server 另外保存：
+必須保存：
 
 ```text
 PlayerId ≠ SlotIndex
 ```
 
-相關跨層證據入口：
-
-```text
-Room_Lobby_GameRule.md
-Network_Protocol.md
-Gameplay_Network.md
-```
+詳細證據：[`Network_Protocol.md`](Network_Protocol.md)、[`Room_GameRule_Mode.md`](Room_GameRule_Mode.md)。
 
 ## 4. Room
-
-最小模型：
 
 ```text
 Room
 ├─ GameMode
-├─ MapSelectorValue
-├─ RuleSelectorValue
-├─ ObjectSelectorValue
-├─ TimeSelectorValue
+├─ MapSelector
+├─ RuleSelector
+├─ ObjectSelector
+├─ TimeSelector
 ├─ PackedRoomFlags
 ├─ MasterPlayerId
 ├─ PlayerSlot[16]
 └─ RoomPhase
 ```
 
-selector 必須保留兩層：
+每個 selector 都保留：
 
 ```text
 OptionIndex
 OptionValue
 ```
 
-不能只保存 UI index。
-
-完整 evidence：
-
-```text
-Room_Lobby_GameRule.md
-Room_Settings_Packets.md
-Room_Channel_GameRule_101_192_Field_Evidence.md
-```
+詳細研究：[`Room_GameRule_Mode.md`](Room_GameRule_Mode.md)。
 
 ## 5. PlayerSlot[16]
 
-Client 存在固定 16-slot player model，因此 Server 第一階段也應採固定容量抽象：
+Client 存在固定 16-slot player model；Server 第一階段也使用固定容量抽象：
 
 ```text
 PlayerSlot
@@ -167,17 +140,9 @@ PlayerSlot
 └─ ScoreState
 ```
 
-`TeamId`、`GroupId` 與其它 relation-like state 目前不要過早合併成單一欄位。
+`TeamId`／`GroupId` 暫不合併成單一 relation 欄位。
 
-詳細研究入口：
-
-```text
-Room_Lobby_GameRule.md
-```
-
-## 6. Room → Match 的生命週期
-
-跨文件目前最可信的狀態骨架：
+## 6. Room → Match lifecycle
 
 ```text
 CHANNEL / LOBBY
@@ -197,26 +162,18 @@ MATCH_ENDING
 POST_MATCH / ROOM
 ```
 
-跨層 graph 由：
-
-```text
-Room_Lobby_GameRule.md
-Gameplay_Network.md
-Result_Quest_Stats.md
-```
-
-共同支撐。
+由 [`Room_GameRule_Mode.md`](Room_GameRule_Mode.md)、[`Gameplay_Network.md`](Gameplay_Network.md)、[`Result_Quest_Stats.md`](Result_Quest_Stats.md) 共同支撐。
 
 ## 7. MatchRuntime
-
-最小抽象：
 
 ```text
 MatchRuntime
 ├─ Phase
 ├─ GameMode
 ├─ MapValue
-├─ TimeLimit
+├─ RuleValue
+├─ ObjectValue
+├─ TimeValue
 ├─ ElapsedTime
 ├─ RoundIndex
 ├─ RoundState
@@ -227,11 +184,11 @@ MatchRuntime
 └─ ResultState
 ```
 
-`RoundIndex` 與 `ElapsedTime` 必須是可分離欄位：不同模式的 Client UI 與 GameRule 行為同時存在時間型與回合型進度。
+`RoundIndex` 與 `ElapsedTime` 必須分開；不同 mode 同時存在回合型與時間型進度。[OPEN]
 
 ## 8. Score / Result 分層
 
-至少分開三個 Client data layer：
+至少分成三個 Client data layer：
 
 ```text
 Live round / mode-local
@@ -244,145 +201,134 @@ Local result-screen My K/D
     +60150 / +60151
 ```
 
-因此 Server model 不應建立單一 `KillDeath` 欄位並讓所有 packet 直接共用。
+不能建立一個 global `KillDeath` 欄位讓所有 packet 共用。[C]
 
-詳細 evidence：
+完整證據由 [`Result_Quest_Stats.md`](Result_Quest_Stats.md) 維護；其中包含 `269 subtype 7` producer/consumer evidence。[C]
 
-```text
-Gameplay_Network.md
-TCP_269_Subtype7_Field_Detail.md
-Result_Quest_Stats.md
-```
-
-## 9. Economy / Profile state
-
-帳戶經濟資料是獨立於 Live combat state 的一層：
+## 9. Profile / Economy / Inventory
 
 ```text
-ProfileEconomy
-├─ PG
-├─ CASH
-└─ CP
+PlayerProfile
+├─ CharacterAppearanceState
+├─ ItemCollection
+│    └─ OwnedItem
+│         ├─ Identity
+│         ├─ ItemAssociatedValues
+│         └─ DurabilityState
+├─ WeaponLoadout
+│    ├─ Primary
+│    ├─ Secondary
+│    ├─ Melee
+│    └─ Throw
+├─ SwitchWeaponSlot
+├─ ItemSlotToClient[9]
+└─ ProfileEconomy
+     ├─ PG
+     ├─ CASH
+     └─ CP
 ```
 
-目前 Client 已直接閉合：
+詳細 domain model：[`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md)。
 
-```text
-EE8D18 → PG
-ArgList → CASH
-EE8D1C → CP / COUPON UI
-```
+`198/200/203/218/220/221` wire codec：[`ClientData_Protocol.md`](ClientData_Protocol.md)。
 
-205/207 等 ClientData／collection synchronization 也會同步其中部分值。
+## 10. Network boundary
 
-詳細欄位證據：
-
-```text
-Currency_State_Field_Evidence.md
-Character_Inventory_Equipment.md
-MyInfo_198_ClientData_Field_Schema.md
-```
-
-## 10. Character / Inventory / Loadout 分層
-
-Server 不應把角色、物品與武器視為同一張 flat inventory table：
-
-```text
-CharacterState
-    ↓
-Appearance / Avatar state
-
-InventoryState
-    ↓
-OwnedItem[...]
-
-LoadoutState
-    ↓
-Primary / Secondary / Melee / Throw
-```
-
-角色複合資源、物品集合與武器裝備都有不同 Client data structure。
-
-詳細資料：
-
-```text
-Character_Inventory_Equipment.md
-MyInfo_198_ClientData_Field_Schema.md
-ClientData_Shared_Decoder_Field_Evidence.md
-```
-
-## 11. Network boundary
-
-Server 至少維持三個獨立 network families：
+Server 至少維持：
 
 ```text
 TCP GameRule / Room control
 TCP Y_TCP_INF gameplay/event
+TCP dropped-world-object / pickup events
 UDP real-time gameplay
 ```
 
-它們的：
+它們的 opcode namespace、frame、serializer/parser、queue 與 state application 不可因最後都修改 `PlayerSlot` 就合併。[C]
 
-```text
-opcode namespace
-framing
-serializer/parser
-queueing
-state application
-```
+Transport：[`Network_Protocol.md`](Network_Protocol.md)
+Room packet：[`Room_Channel_GameRule_101_221_Field_Evidence.md`](Room_Channel_GameRule_101_221_Field_Evidence.md)
+Gameplay：[`Gameplay_Network.md`](Gameplay_Network.md)
+UDP movement：[`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md)
 
-不可因最終都修改 `PlayerSlot` 就共用同一 packet abstraction。
-
-詳細資料：
-
-```text
-Room_Channel_GameRule_101_192_Field_Evidence.md
-Gameplay_Network.md
-Network_Protocol.md
-UDP_Move_Inf_DeepEvidence.md
-```
-
-## 12. Y_TCP_INF 的 Server 抽象
-
-第一階段只需要：
+## 11. Y_TCP_INF Server abstraction
 
 ```text
 YTcpInfRequest
 ├─ Opcode = 165
+├─ ActorOrSource
+├─ Subtype
+└─ VariantPayload
+
+YTcpInfAck
+├─ Opcode = 166
+├─ ActorOrSubject
 ├─ Subtype
 └─ VariantPayload
 ```
 
-不要預先建立：
+不要先建立：
 
 ```text
 DamagePacket
 KillPacket
 ```
 
-因 Client 已確認 165 是 polymorphic family，至少包含：
+因 165/166 是 polymorphic gameplay family。[C]
+
+詳細證據：[`Gameplay_Network.md`](Gameplay_Network.md)。
+
+## 12. Dropped-world-object abstraction
 
 ```text
-MultiDamage
-BotSuicide
-Normal damage
-Mine/Bomb damage
+DroppedWorldObject
+├─ InstanceId
+├─ ResourceOrActionId
+├─ Transform / raw spatial state
+└─ UnknownState
 ```
 
-完整 165/166 事件、parser、sender 與 state evidence 由：
+`InstanceId != ResourceOrActionId`。[C]
+
+具體 960–963 wire/state 由 [`Gameplay_Network.md`](Gameplay_Network.md) 維護。
+
+## 13. Combat state boundary
+
+Combat Server abstraction 保持：
 
 ```text
-Gameplay_Network.md
+DamageInput
+├─ Source
+├─ Target
+├─ RawValue
+├─ HitResult
+├─ ModifierContext
+└─ VariantContext
 ```
 
-維護。
-
-## 13. Room settings → MatchRuntime
-
-基本資料流：
+但：
 
 ```text
-UI selector state
+HitDetectionResult
+    ≠ DamageInput
+    ≠ authoritative DamageResult
+```
+
+Client 目前可確認存在：
+
+```text
+local hit detection
+→ damage/event construction
+→ 165 request
+```
+
+是否所有 mode 的最終 damage 都由同一 authority path 決定，仍 `[OPEN]`。[C]
+
+詳細證據：[`Gameplay_Network.md`](Gameplay_Network.md) 的 Combat 章節。
+
+## 14. Room setting → MatchRuntime
+
+```text
+UI selector
     ↓
 OptionValue validation
     ↓
@@ -390,24 +336,10 @@ Room state
     ↓
 Start precondition
     ↓
-MatchRuntime initialization
+CGameRule / ModeRuntime
 ```
 
-尤其：
-
-```text
-MapSelectorValue
-RuleSelectorValue
-ObjectSelectorValue
-TimeSelectorValue
-PackedRoomFlags
-```
-
-都不應直接等同於最終 mode semantic；應交給 `ModeRule` / `GameRule` 層解譯。
-
-## 14. Mode-specific state
-
-不同 mode 的：
+Mode-specific：
 
 ```text
 Win condition
@@ -418,49 +350,41 @@ Spawn rule
 Team aggregation
 ```
 
-必須是 mode-specific rule 的責任，而不是塞入通用 Room parser。
+由 [`Room_GameRule_Mode.md`](Room_GameRule_Mode.md) 解譯，不由 generic Room parser 自行決定。
 
-對應研究：
+## 15. Evidence → Server contract
+
+當新證據出現：
 
 ```text
-Mode_Rules_And_Options.md
-Room_Lobby_GameRule.md
-Gameplay_Network.md
+1. 更新對應 wire/domain 主文件
+2. 若跨多子系統成立，再更新本文件抽象
+3. 不在本文件建立第二份 Packet / Field truth
 ```
 
-## 15. Evidence → Server contract 的升級規則
-
-當新的 Client / Resource / Wiki 證據出現時：
+最低條件：
 
 ```text
-1. 更新對應 packet / field 主文件
-2. 若跨多個子系統成立，再更新本文件抽象
-3. 不在本文件新增第二份欄位真相
-```
-
-可升級為 Server contract 的最低條件：
-
-```text
-Client parser / serializer 已閉合
-        +
-caller / consumer data-flow 一致
-        +
-必要時 Resource / Wiki 交叉驗證
+serializer/parser 已閉合
++
+caller/consumer data-flow 一致
++
+必要時 Resource/Wiki 交叉驗證
 ```
 
 ## 16. 目前禁止的 Server 過早簡化
 
 ```text
 PlayerId == SlotIndex
-RoomSelectorIndex == SelectorValue
+OptionIndex == OptionValue
 Kill == TeamKills
 165 == DamagePacket
 166 == DamageAck
 RoundIndex == ElapsedTime
 Client object offset == wire offset
+DroppedObjectInstanceId == ResourceOrActionId
+HitDetectionResult == DamageResult
 ```
-
-任何以上等式若沒有新的直接證據，都不應進入正式 Server protocol contract。
 
 ## 17. 下一個跨層閉合目標
 
@@ -473,11 +397,13 @@ PlayerSlot[16]
   ↓
 GameRule / MatchRuntime
   ↓
-Y_TCP_INF / UDP gameplay
+Gameplay / Combat / UDP
   ↓
 Live state
   ↓
-Result / Quest / Profile synchronization
+Result / Quest
+  ↓
+Profile / Inventory / Economy
 ```
 
-下一階段應優先把這張 graph 與具體 packet sender/receiver、Resource identity、Wiki behavior 一一接上；本文件只維護 graph，不重新複製下層證據。
+下一階段只在有新證據時細化這張 graph；packet bytes、field semantics 與單一函式證據仍回到其各自主文件。
