@@ -85,6 +85,8 @@ logical_length + 8
 
 Client 只有在 buffer 至少具備完整 frame 時才處理；完成後移除恰好一個 frame，餘下 bytes 留給下一個 frame。[C]
 
+`sub_591FB0()` 將新收到的 bytes append 到 `Packet` 的 internal buffer；`sub_591D50()` 檢查目前 buffered bytes 是否至少包含完整 frame；完成 dispatch 後 receive loop 會扣除該 frame 長度並將剩餘 bytes 前移，故 TCP parser 必須支援 fragmentation 與 coalescing。[C]
+
 因此 Server 不得假設：
 
 ```text
@@ -135,7 +137,7 @@ PayloadBitCountChecksum : ushort
 
 ### 4.2 Header +0x06
 
-`+0x06` 參與壓縮／解壓縮或 validation path，但正式 semantic 尚未閉合。[C][OPEN]
+`+0x06` 參與 transform / validation path；`sub_592E50()`、`sub_592E90()`、`sub_592F60()`、`sub_5930C0()` 代表另外的 data transform / validation stages，但目前尚未有足夠證據把 `+0x06` 單獨命名成 compression length、sequence 或 crypto field。[C][OPEN]
 
 暫名：
 
@@ -148,27 +150,33 @@ header_aux_u16
 目前主要 helper：
 
 ```text
-u8 read/write → sub_592900 / sub_592920 / sub_592940
+u8 read/write → sub_592900 / sub_592920 / sub_592940 / sub_592960 / sub_592980
 u16 read/write → sub_5929C0 / sub_5929E0 / sub_592A00
-u32 read/write → sub_592A20 / sub_592A40 / sub_592AA0 / sub_592AC0 / sub_592B20 / sub_592B40
-u64/raw8       → sub_592AE0 / sub_592B00
+u32 read/write → sub_592A20 / sub_592A40 / sub_592A60 / sub_592A80 / sub_592AA0 / sub_592AC0 / sub_592B20 / sub_592B40
+u64/raw8       → sub_592AE0 / sub_592B00 / sub_592B60 / sub_592B80
 string         → sub_5926F0 / sub_592730
 raw            → sub_592500 / sub_592580
+```
+
+直接 source 已重新核對：
+
+```text
+sub_592900 / 920 / 940 / 960 / 980 = 1 byte
+sub_5929C0 / 9E0 / A00             = 2 bytes
+sub_592A20 / A40 / A60 / A80 / AA0 / AC0 = 4 bytes
+sub_592AE0 / B00 / B60 / B80       = 8 bytes
+sub_592B20 / B40                    = 4 bytes
 ```
 
 特別重要：
 
 ```text
-sub_592B20 = 實際寫 4 bytes
-sub_592B40 = 實際讀 4 bytes
-sub_592AE0 = 實際寫 8 bytes
-```
-
-所以：
-
-```text
 Hex-Rays local prototype ≠ wire width
 ```
+
+例如 `sub_592B20()` 的表面 prototype 看起來只接 `char`，實際呼叫 `sub_592580(..., 4u)`，所以 wire width 是 4 bytes。[C]
+
+同樣，local array 大小也不能當成 wire width。`sub_602E30()` 的 `_BYTE v25[16]` 並不代表一次讀取 16 bytes；該 call-site 只呼叫一次 `sub_592940()`，實際只消耗 1 byte。[C]
 
 ## 6. TCP receive dispatcher
 
@@ -186,11 +194,11 @@ CGameRule::sub_67CF90
 opcode = sub_591EE0(packet)
 ```
 
-主要 server-originated route 目前可見：
+目前直接看到的主要 server-originated route：
 
 ```text
 160 → sub_58D790
-166 → sub_58D820
+166 → sub_58D820 → sub_749B90
 168 → sub_56F410
 170 → sub_56F4F0
 172 → sub_56F5D0
@@ -198,7 +206,7 @@ opcode = sub_591EE0(packet)
 176 → sub_56F790
 ```
 
-另承接 `193–221`、`223–245`、`269` 等 family；精確 payload 由各主題文件維護。[C]
+另承接 `101–221`、`223–245`、`269` 等 family；精確 payload 由各主題文件維護。[C]
 
 ## 7. TCP submission
 
@@ -221,23 +229,46 @@ sub_602E00
 
 不是另一套 transport。[C]
 
-## 8. UDP receive architecture
+## 8. UDP transport architecture
 
 UDP 不經 `sub_58B010`：
 
 ```text
-CUDPNetworkManager
-    ↓
-sub_595A60
-    ↓
-sub_595E80
-    ↓
-opcode switch
-    ↓
-UDP handler
+CUDPManager::sub_595840
+    → sub_595A60
+    → recvfrom
+    → sub_595E80
+    → UDP opcode handler
 ```
 
-目前已直接觀察的主要 routes：
+UDP socket 明確建立為：
+
+```text
+socket(AF_INET, SOCK_DGRAM, 0)
+```
+
+`CUDPSocket` constructor 的預設 port-like member 為 `27000`；`sub_596DA0()` 建立/儲存 local bind 與 remote address，`sub_596EB0()` / `sub_596F00()` / `sub_596F50()` 是 sendto wrappers，`sub_596F90()` / `sub_596FF0()` 是 recvfrom wrappers。[C]
+
+`CUDPManager::sub_595840()` 為永久 thread loop，持續呼叫 `sub_595A60()` 後 `_sleep(1)`。[C]
+
+### 8.1 UDP packet framing
+
+`sub_595A60()` 收到 datagram 後：
+
+```text
+recvfrom(..., 9600)
+→ sub_591FB0(Packet, bytes, received_length)
+→ sub_591D50(Packet)
+→ received_length >= logical_length + 8
+→ sub_5930C0(Packet)
+→ sub_595E80(...)
+```
+
+因此 UDP 在這個 client 中仍使用與 `Packet` 類似的內部 frame/transform model；不能把 UDP gameplay record 直接當成裸 payload 而跳過這層驗證。[C]
+
+### 8.2 UDP receive dispatch
+
+`sub_595E80()` 的 direct switch：
 
 ```text
 2   → sub_593A60
@@ -264,6 +295,8 @@ UDP handler
 158 → sub_596910
 ```
 
+因此 UDP opcode/type space 明顯不只一種 movement packet。[C]
+
 ## 9. UDP `Y_UDP_S_MOVE_INF`：8/24
 
 `sub_596940()` 有明文診斷：
@@ -272,15 +305,14 @@ UDP handler
 BUGCUDPNetworkManager::OnY_UDP_S_MOVE_INF : [g_byGamePlay : %d]
 ```
 
-且只有 `n15 == 13` 時進入 `sub_593750()`。[C]
+且只有 `n15 == 13` 時進入 `sub_593750()`；否則會記錄錯誤並中止該 path。[C]
 
 完整 queue chain：
 
 ```text
 CUDPManager::sub_595840
     → sub_595A60
-    → recvfrom
-    → validity checks
+    → recvfrom / Packet validation
     → sub_595E80
     → opcode 8 / 24
     → sub_596940
@@ -288,268 +320,426 @@ CUDPManager::sub_595840
     → queue node
     → sub_593510
     → sub_602E30
-    → per-player movement/state decode
+    → per-actor movement/state decode
 ```
 
-### 9.1 `sub_593510()` 是 central update consumer
+### 9.1 `sub_593750()` / queue
 
-中央更新：
+`sub_593750()` 在 critical section 內將 Packet 插入 queue。[C]
+
+`sub_593510()` 由 central update path 呼叫：
 
 ```text
-sub_406830
-    → sub_58AFD0
-        → sub_593510(&byte_1324330)
+lock queue
+→ dequeue node
+→ sub_602E30(Packet)
+→ free/cleanup node
 ```
 
-`sub_593510()` 會 lock queue、逐 node 處理、呼叫 `sub_602E30(node Packet)`，最後清除 processed list。[C]
+另外 `sub_5934B0()` 有 `0x7530 = 30000 ms` 的 timeout test；在指定狀態下 `sub_593510()` 會建立 TCP opcode 697。此 697 path 應視為 UDP/transport health-related control path；其更精確語意仍由 higher-level protocol file 維護。[C][OPEN]
 
-Shutdown cleanup 則走其它 path，例如 `sub_58AF90 → sub_595D50`；因此 `sub_593510()` 不是單純 destructor/cleanup。[C]
+## 10. UDP movement body：目前已重新精確落位
 
-### 9.2 Queue node
+### 10.1 `sub_602E30()` 的 parser
 
-`sub_593750()`：
+開頭先讀：
 
 ```text
-EnterCriticalSection(queue +20)
-→ node creation
-→ LeaveCriticalSection
+u8 actor_count = N
 ```
 
-node 重要欄位：
+每一筆 actor record **不是 27 bytes 的舊版猜測表，也不是 43 bytes**。逐一按 helper 的真實 read width 計算後，確定為：
 
 ```text
-+0 iterator/link
-+4 list/link
-+8 Packet object
+26 bytes / actor
 ```
 
-node +8 的 Packet 最終交給 `sub_602E30()`。[C]
-
-### 9.3 `sub_602E30()` body
-
-開頭讀：
+原因是：
 
 ```text
-u8 count = N
+_BYTE v25[16]
 ```
 
-之後解析 N 筆 actor record，再套用 actor/controller state。[C]
+只是 local scratch buffer；source 實際只有：
 
-單筆 record 精確 wire layout：
+```c
+sub_592940(a1, v25);
+```
+
+而 `sub_592940()` 實際只讀 1 byte。[C]
+
+### 10.2 精確 wire layout
+
+以 actor record 起始位置為 `R`：
 
 ```text
-u8  field_00
-u8  field_01
-u8  field_02
-u32 field_03
-u32 field_04
-u8  field_05
-u16 field_06
-u16 field_07
-u16 field_08
-u8  field_09
-u8  field_0A
-u8  field_0B
-u8  field_0C
-u8  field_0D
-u32 field_0E
+R+00  u8   v28
+R+01  u8   v19
+R+02  u8   n16
+R+03  u32  v30
+R+07  u32  v16
+R+11  u8   v25[0]
+R+12  u16  v35
+R+14  u16  v36
+R+16  u16  v37
+R+18  u8   v23
+R+19  u8   v38
+R+20  u8   v14
+R+21  u8   v15[0]
+R+22  u8   n0x1C
+R+23  u32  v29
 ```
 
-合計：
+總長：
 
 ```text
-27 bytes / actor
+3 + 4 + 4 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 1 + 1 + 4
+= 26 bytes
 ```
 
-因此 movement body：
+整個 movement payload 的 actor body：
 
 ```text
 u8 N
-N × 27-byte actor record
+N × 26-byte actor record
 ```
 
-也就是 body consumption = `1 + 27×N`；這不是完整 UDP datagram length。[C]
+這是目前以 C parser 為準的正式 byte-level truth。[C]
 
-## 10. UDP actor record semantics
-
-### `field_02`
-
-送入：
+### 10.3 目前可以安全命名的欄位
 
 ```text
-sub_67DF00(field_02)
-sub_67D7D0(field_02)
+R+00 v28       → semantics [OPEN]
+R+01 v19       → semantics [OPEN]
+R+02 n16       → Actor/User identity candidate
+R+03 v30       → semantics [OPEN]
+R+07 v16       → movement/sample state candidate [OPEN]
+R+11 v25[0]    → passed into sub_5B3180(actor, byte); state byte candidate [OPEN]
+R+12 v35       → spatial component candidate
+R+14 v36       → spatial component candidate
+R+16 v37       → spatial component candidate
+R+18 v23       → controller/state byte candidate [OPEN]
+R+19 v38       → controller/state byte candidate [OPEN]
+R+20 v14       → controller/state byte candidate [OPEN]
+R+21 v15[0]    → controller/state byte/raw-one-byte candidate [OPEN]
+R+22 n0x1C      → state/action byte candidate [OPEN]
+R+23 v29       → resource/action/sample value candidate [OPEN]
 ```
 
-最後映射到 `<16` player slot，故目前只能叫：
+其中 `n16` 直接流入：
 
 ```text
-ActorId / PlayerId candidate
+sub_67DF00(n16)
+sub_67D7D0(n16)
 ```
 
-不能直接等同 SlotIndex / session id。[C][OPEN]
+且後者會落到 `<16` 的玩家 slot range，因此 `n16` 是 actor/player identity candidate；但不能直接命名成 SlotIndex。[C][OPEN]
 
-### `field_04`
+### 10.4 三個 u16 spatial components
 
-u32，進 movement/controller sample path。[C]
-
-目前不能命名 timestamp、sequence 或 velocity。[OPEN]
-
-### `field_05`
-
-進：
+C 直接做：
 
 ```text
-sub_5B3180(actor, field_05)
+v20 = v35 / 3.0
+v21 = v36 / 3.0
+v22 = v37 / 3.0
 ```
 
-寫入 actor/player state `+233`；因此不是 padding。
+之後把它們作為 player/controller transform sample 的 3D vector 使用。[C]
 
-目前：
+因此高度確定：
 
 ```text
-controller state byte candidate
+R+12/R+14/R+16 = 3 個固定點位／空間量化分量
 ```
 
-[C][OPEN]
+但 exact axis ordering、world unit、quantization origin 目前仍 `[OPEN]`。
 
-### `field_06..08`
+### 10.5 其餘 byte 欄位不能用 local variable type 猜
 
-各除以 `3.0`：
+`v23`、`v38`、`v14`、`v15[0]`、`n0x1C` 都是獨立的 1-byte wire values，之後進入 controller/state/effect path；目前沒有證據可以把它們直接命名成 crouch、jump、fire、stance、weapon 等特定 enum。[C]
+
+尤其：
 
 ```text
-x = field_06 / 3.0
-y = field_07 / 3.0
-z = field_08 / 3.0
+local variable name
+local array size
+Hex-Rays guessed type
 ```
 
-再經 `sub_9BCB00()` 與 `IPaperCtrl::sub_9BCBD0()` 做 sample interpolation / averaging。[C]
+均不是 wire semantic 的證據。
 
-因此是高度支持的 3D spatial/transform components；正式軸名稱與單位仍 `[OPEN]`。
+## 11. Actor state application
 
-### `field_09..0D`
-
-都會進 gameplay/controller state path；不能只猜成 crouch/fire/jump/stance/weapon。[C][OPEN]
-
-### `field_0E`
-
-最重要的 Resource/Action candidate：
+每筆 actor record 解析後：
 
 ```text
-sub_5E2570(..., field_0E, ...)
-sub_548E80(player, field_0E, ...)
+n16
+  → sub_67DF00(n16)
+  → sub_67D7D0(n16)
+  → player runtime
 ```
 
-`sub_548E80()` / `sub_548C80()` 會直接比對：
+self/remote actor 判定後，client 會處理 per-slot flags，然後：
 
 ```text
-BOMBPLANT
-Pulp_A
-Pulp_B
-magic_finger
-Escape
+v12[0] = v16
+v12[1] = v35 / 3.0
+v12[2] = v36 / 3.0
+v12[3] = v37 / 3.0
+
+sub_5B3180(actor, v25[0])
+sub_9BCB00(actor, v12)
+sub_5B34B0(actor, v29, n0x1C, v38, v34, n16)
+sub_5B71F0(&v20, n16)
 ```
 
-以及 actor 內多組 action/resource identities。[C]
+`sub_9BCB00()` 把新 snapshot/state 寫入 actor interpolation/state structure；因此 `v12` 是至少包含一個非空間 u32 與 3 個空間 float 的 snapshot。[C]
 
-因此目前最安全：
+`sub_5B3180()` 直接把 `v25[0]` 寫入 actor `+233`，證明 R+11 是有語意的 state byte，而不是 padding。[C]
+
+`sub_5B34B0()` 接收：
 
 ```text
-field_0E = ResourceOrActionId candidate
+v29, n0x1C, v38, v34, n16
 ```
 
-### 10.1 field_0E → TCP 714 report
+並進一步參與 controller/effect processing；exact enum mapping 尚 `[OPEN]`。[C]
 
-當 player conditions 滿足時，`field_0E` 還會造成 counter 累積，超過 40 後建 TCP 714，內容至少包含：
+`sub_5B71F0()` 會以 `sub_67D7D0(n16)` 找 player slot，並將 `dword_F6DD34[slot]` 經 `sub_568470()` / `sub_9C1B20()` / `sub_62D6C0()` 套入輸入/position-like state；它不是 packet parser 本身，而是 actor update 的後續 state propagation。[C]
+
+## 12. UDP send / peer transport
+
+### 12.1 Generic packet send
+
+`sub_595900(packet)`：
 
 ```text
-u8 local player/network id
-u8 byte_EE896D
-u8 player +240596
-string player +64
-u32 field_0E
+len = sub_591F00(packet) + 8
+send local UDP socket from packet + 24
 ```
 
-再由 `sub_55D960()` 發送。[C]
+因此 `Packet` object 的 internal base 與 physical datagram buffer 並不是同一個 address。[C]
 
-因此 714 是另一條 Client→Server report path，但**不能僅此命名成 anti-cheat/cheat report**。[C][OPEN]
+### 12.2 Peer-address send
 
-## 11. UDP queue lifecycle
+`sub_595980()` 可將 packet 封裝成 `logical_length + 8` 後，使用傳入的 address pair 送出；`sub_595A10()` 先以 `sub_595BD0()` 取得目前 peer address。[C]
 
-初始化／destruction：
+### 12.3 已確認的 UDP periodic packets
+
+`sub_596180()`：
 
 ```text
-sub_58ED30
-    → sub_595C90
-    → sub_593460
-
-sub_593460
-    → queue reset
-    → InitializeCriticalSection(queue +20)
-
-sub_5933F0
-    → static constructor path
-
-sub_ADC370
-    → sub_593410
-    → static destructor path
+每 >= 1000 ms
+→ Packet opcode 17
+→ sub_595900()
 ```
 
-支持：
+`sub_596670()`：
 
 ```text
-UDP receive
-→ enqueue
-→ central update dequeue
+每約 500 ms
+→ Packet opcode 19
+→ sub_595A10()/related UDP path
 ```
 
-的架構。[C]
+其中 19 還帶有 retry/count-like state，最多進入 5 次的 escalation path；不能只稱為普通 heartbeat。[C][OPEN]
 
-## 12. Transport 與 payload 邊界
+## 13. Gameplay event relationship
 
-UDP movement：
+UDP movement 與 TCP gameplay event 並非兩條完全獨立的語意世界。TCP opcode 166 會進：
 
 ```text
-Packet body
-    = u8 count + N × 27-byte actor record
+sub_58B010
+→ sub_58D820
+→ sub_749B90
 ```
 
-但：
+`sub_749B90()` 再依 subtype 將事件送入多個 gameplay handlers：
 
 ```text
-body length
-    ≠
-datagram length
+7       → sub_748E40
+8/9/18/25 → sub_748EB0
+12      → sub_749A30
+13      → stage/player reset cleanup
+17      → sub_748FF0
+24      → time / round-like handling
+1       → sub_746360
+2/16    → sub_7463E0
+3/20    → sub_747980
+4       → sub_748860
+5       → sub_748A50
+6       → sub_748CD0
+10      → sub_749230 / sub_749520
+11      → sub_7494B0 / sub_749810
+14      → sub_749AB0
+15      → sub_748420
+19      → sub_74D150
+21      → sub_747DD0
+22      → sub_747AB0
+23      → sub_74D410
+26      → sub_745F50
+27/29   → sub_746060
+30      → sub_74D510
+31/32   → sub_74D5D0
 ```
 
-同樣，TCP：
+因此 opcode 166 是 subtype-bearing gameplay event envelope，不是單一事件。[C]
+
+## 14. TCP opcode 165：Client→Server gameplay event envelope
+
+目前多個 sender 都直接建立 opcode 165，顯示它是 gameplay event family，而非單一 damage struct。
+
+### 14.1 `sub_55CAB0()` — OnSendPacketDamage
+
+Common shape：
 
 ```text
-payload length
-    ≠
-logical frame length
-    ≠
-physical send length
+u8 source/player
+u8 subtype
+(optional special-mode: 3 × u16)
+u8 target/player
+(optional effect/category byte for selected subtypes)
+u16 weapon/resource identity
+u32 transformed value A
+u32 transformed value B
+u8 n4
+u8 a8
+u8 a9
+u32 target-related state dword_F6DD1C[target]
+u8 a10
+u32 a11
+u32 a12
+u32 a13
+(optional n4==4: resource/action byte + int, or 255)
 ```
 
-Server codec 必須在 transport 與 packet schema 間保持明確邊界。[C]
+實際 output 會把 `sub_5E72C0()` 產生的兩個 values 量化後用 `sub_592B20()` 寫出；因 `sub_592B20()` 是 4-byte writer，這裡不是 1-byte float field。[C]
 
-## 13. Server reconstruction
+### 14.2 `sub_55D090()` — OnSendPacketMineBombDamage
+
+同為 opcode 165，但 subtype 由 caller 傳入，並含：
+
+```text
+source
+subtype
+ target
+ optional effect/category
+resource u16
+2 × transformed u32-like values
+several zero/state u32 fields
+dword_F6DD1C[target]
+additional bytes
+```
+
+因此 mine/bomb damage 是同一 opcode family 的另一 branch。[C]
+
+### 14.3 `sub_55D530()` — OnSendPacketMultiDamage
+
+明確寫入 subtype `16`，後面除 source/target/resource 外，還有多個額外 4-byte values，代表 multiple-hit/multi-damage aggregation；這也是 opcode 165 的另一個固定 subtype branch。[C]
+
+### 14.4 其它直接 sender
+
+```text
+sub_55C9F0() → opcode 165 subtype 24 / 22
+sub_55D440() → opcode 165 subtype 15
+```
+
+這再次證實 165 應抽象成：
+
+```text
+GameplayEvent165
+    = source + subtype + subtype-specific payload
+```
+
+而不是 `DamagePacket` 一個 class。[C]
+
+## 15. Damage / weapon state boundary
+
+`sub_5E1CD0()` 會在條件下選擇：
+
+```text
+sub_5E06A0()
+或
+sub_5E0F10()
+```
+
+後者遍歷 target/hit candidates、取 `sub_67DFB0(actor)`，再經 weapon/action/resource lookup 計算 damage。它會從 4 個 weapon loadout slots 中比對 current action/resource identity，並進一步呼叫 `sub_603230()` 等 effect/hit generation path。[C]
+
+當 computed damage 達到 threshold 時：
+
+```text
+sub_9BC3E0(target, ...)
+sub_9BC420(hit_effect_selector, transformed_hit_position)
+sub_5E63C0(...)   // death/state transition when applicable
+```
+
+之後 local client 再經 `sub_55CAB0()` 等 sender 將 gameplay event 發出去。[C]
+
+因此目前可安全建模成：
+
+```text
+input / local simulation
+    → hit / weapon calculation
+    → local visual/state application
+    → gameplay event packet
+    → server-side validation / authoritative resolution
+```
+
+最後一段的 authoritative server boundary 在目前 client-only evidence 中仍不是「所有情況 100% 證明」，所以 server model 應標為高可信 architectural inference，而非偽裝成直接 C proof。[C][OPEN]
+
+## 16. UDP / TCP / state 三層不能混為一談
+
+目前模型：
+
+```text
+Transport
+├─ TCP stream
+└─ UDP datagram/thread
+
+Protocol envelope
+├─ Packet frame
+├─ opcode/type
+└─ subtype / variable payload
+
+Gameplay state
+├─ PlayerState
+├─ Character/Equipment
+├─ Weapon/Action
+├─ Hit/Damage
+├─ Room/Mode
+└─ Result/Quest
+```
+
+尤其：
+
+```text
+actor identity != slot index
+weapon identity != action identity
+packet opcode != packet subtype
+runtime object offset != wire field offset
+```
+
+這些 distinction 是重寫 Server 時避免系統性錯位的核心。
+
+## 17. Server reconstruction boundary
 
 Network layer：
 
 ```text
 TCP
-├─ StreamReader / frame reassembly
-├─ Integrity / XOR / checksum
+├─ Stream reader / frame reassembly
+├─ integrity / XOR / checksum
+├─ transform/validation
 ├─ OpcodeRouter
-└─ Packet codec
+└─ packet codec
 
 UDP
-├─ Datagram receive
+├─ datagram receive
+├─ Packet validation / transform
 ├─ OpcodeRouter
 ├─ MovementQueue
-└─ MovementPacket codec
+└─ actor-record codec
 ```
 
 Gameplay semantic 再交給：
@@ -559,37 +749,79 @@ Room_GameRule_Mode.md
 Gameplay_Combat.md
 Result_Quest_Stats.md
 Character_Inventory_Equipment.md
+Login_ClientData_Protocol.md
+Resource_Pack_Model.md
 ```
 
-## 14. 目前 OPEN
+## 18. 目前仍真正 OPEN 的問題
 
 ```text
-TCP header +0x06 semantic
-compression / validation complete conditions
-extra ordering / sequence state
-transport error / retry paths
-unmapped incoming opcode semantics
-virtual callback concrete targets
+TCP header +0x06 的正式語意
+TCP transform/compression exact formula 與 enable conditions
+完整 TCP send queue / retry semantics
 
-UDP field_02 exact ID namespace
-UDP field_03 semantics
-UDP field_04 semantics
-UDP field_05 formal state enum
-UDP field_09..0D formal meanings
-UDP field_0E exact Resource/Action namespace
-UDP field_0E → TCP 714 purpose
-UDP actor-record initialization / sender path
-UDP datagram-level extra framing
+UDP movement 26-byte record 的：
+  R+00 v28 exact meaning
+  R+01 v19 exact meaning
+  R+02 n16 exact identity namespace
+  R+03 v30 exact meaning
+  R+07 v16 exact meaning
+  R+11 v25[0] formal state enum
+  R+12/R+14/R+16 exact axis/unit encoding
+  R+18 v23 exact meaning
+  R+19 v38 exact meaning
+  R+20 v14 exact meaning
+  R+21 v15[0] exact meaning
+  R+22 n0x1C exact meaning
+  R+23 v29 exact namespace/semantics
+
+UDP 8/24 sender/producer call-site
+UDP datagram-level external wrapper beyond Packet layer
+UDP opcode 17/19 exact gameplay/network-health semantics
+UDP timeout 697 counterpart / server role
+
+TCP 165/166 all subtype payloads and exact server validation contracts
+TCP 714 exact counterpart / purpose
+Exact itemdata category-specific weapon/action fields
+Exact maplist tail field names
+Exact public weapon-part slot ↔ PARTS06/07 mapping
+Full raw itemdata.pat byte-level schema
 ```
 
-## 15. 最高價值後續追查
+## 19. 最高價值後續追查順序
 
 ```text
-A. TCP +0x06 → compression / validation / ASM
-B. 所有 sub_592B20 caller → exact field pairing
-C. UDP 8/24 sender / producer
-D. field_02 → sub_67D7D0 → exact identity namespace
-E. field_0E → Extracted resource/action concrete mapping
-F. 714 receive counterpart / server role
-G. 166 subtype 14 ↔ UDP movement ordering
+A. sub_591600 / sub_591900 / sub_593110 / sub_4042A0
+   → close TCP/Packet transform
+
+B. exact UDP 8/24 sender producer
+   → reverse-construct the 26-byte record
+
+C. all consumers of v28/v19/v30/v16/v23/v38/v14/n0x1C/v29
+   → formalize movement fields
+
+D. n16 → sub_67D7D0 → exact actor identity namespace
+
+E. v29 → action/resource identity table
+
+F. 165/166 subtype pairs
+   → build complete gameplay event schema
+
+G. 714 receive counterpart
+   → close client/server report boundary
+
+H. itemdata.pat category-specific fields
+   → close weapon/character/effect definitions
 ```
+
+## 20. Evidence discipline
+
+```text
+[C]     IDA C direct evidence
+[RES]   Extracted resource evidence
+[WIKI]  Wiki / player-observable historical behavior
+[X]     at least two independent evidence classes agree
+[OPEN]  unresolved; do not silently replace with 0 or invented enum
+```
+
+Parser/serializer implementation has priority over Hex-Rays guessed local types. Resource definitions, runtime state, and network wire layouts must remain distinct until a conversion path is directly established.
