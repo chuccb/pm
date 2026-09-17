@@ -39,7 +39,7 @@ Research/README.md
 | 文件 | 唯一責任 |
 |---|---|
 | [Core/README.md](Core/README.md) | Core 導航與閱讀規則 |
-| [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、codec、integrity/XOR、checksum、核心 dispatcher、UDP movement |
+| [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、codec、integrity/XOR、checksum、network wire truth |
 | [Core/Network_Dispatcher_Inventory.md](Core/Network_Dispatcher_Inventory.md) | `sub_58B010` 完整 TCP opcode → handler inventory；不重複 packet/schema semantic |
 | [Core/Login_ClientData_Protocol.md](Core/Login_ClientData_Protocol.md) | `680–696` + `197–221` login / MyInfo / ClientData wire protocol |
 | [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character、Appearance、Inventory、Weapon Loadout、Economy runtime/domain model |
