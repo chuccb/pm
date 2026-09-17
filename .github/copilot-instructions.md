@@ -10,7 +10,48 @@ Research/README.md
 Research/DOCUMENT_INDEX.md
 ```
 
-強制要求：
+## 最短閱讀路徑
+
+不要先把整個 `Research/` 全部載入上下文。先依問題選第一入口：
+
+```text
+Packet transport / frame
+→ Research/Core/Network_Protocol.md
+
+Packet field / width / offset
+→ 對應 Schema / Field Evidence / Detail
+
+Gameplay / 165/166
+→ Research/Core/Gameplay_Network.md
+
+Room / GameRule / Mode
+→ Research/Core/Room_Lobby_GameRule.md
+→ Research/Core/Mode_Rules_And_Options.md
+
+Result / Quest / K-D
+→ Research/Core/Result_Quest_Stats.md
+
+Server object / state abstraction
+→ Research/Core/Server_State_Model.md
+```
+
+基本原則：
+
+```text
+原始 C / LST / Extracted / Wiki
+    ↓
+Wire Schema / Field Evidence
+    ↓
+Domain Semantic
+    ↓
+Server State Model
+    ↓
+C# implementation
+```
+
+上層抽象不能反向創造下層不存在的 Packet／Field 證據。
+
+## 強制要求
 
 - 所有 Markdown 一般說明文字只能使用繁體中文。
 - 研究目標以日本版 PaperMan 2016 年服務終了時的最終 Client 為基準。
