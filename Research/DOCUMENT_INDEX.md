@@ -73,17 +73,15 @@
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Packet_166_Field_Map.md](Core/Packet_166_Field_Map.md) | `166` 欄位快速索引，完整證據回到 Gameplay 主文件 |
+| [Core/Packet_166_Field_Map.md](Core/Packet_166_Field_Map.md) | `166` 欄位快速索引；完整證據回到 Gameplay 主文件 |
 | [Core/TCP_269_Subtype7_Field_Detail.md](Core/TCP_269_Subtype7_Field_Detail.md) | `269 subtype 7` 完整欄位、玩家同步與 Result/K-D 狀態 |
-| [Core/Quest_Result_Packets_223_245.md](Core/Quest_Result_Packets_223_245.md) | `223–245` Quest/Result 封包 |
-| [Core/Result_Stat_Protocol_223_245_381_389.md](Core/Result_Stat_Protocol_223_245_381_389.md) | `223/245/381/389` Result/Stat 協定 |
-| [Core/Score_State.md](Core/Score_State.md) | Score 與計分狀態 |
+| [Core/Result_Stat_Protocol_223_245_381_389.md](Core/Result_Stat_Protocol_223_245_381_389.md) | `223–245`、`381–389` Result/Stat/Quest 主文件 |
 
 ## 八、Quest、Event 與資源模型
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Quest_Event_ID_Mapping.md](Core/Quest_Event_ID_Mapping.md) | Quest/Event 與 ID mapping |
+| [Core/Quest_Event_ID_Mapping.md](Core/Quest_Event_ID_Mapping.md) | Quest/Event 與 ID mapping 字典 |
 | [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | 遊戲資源封裝與資料模型 |
 
 ## 九、Kick Vote
@@ -122,6 +120,12 @@ Login_681_Server_Record_Field_Schema.md
 
 Y_TCP_INF_Handler_Details.md
     → Y_TCP_INF_Damage.md
+
+Quest_Result_Packets_223_245.md
+    → Result_Stat_Protocol_223_245_381_389.md
+
+Score_State.md
+    → Result_Stat_Protocol_223_245_381_389.md
 ```
 
 整合時保留證據、反證、欄位寬度、函式路徑與 `[OPEN]` 邊界；禁止用摘要取代完整研究。
@@ -136,6 +140,7 @@ Y_TCP_INF_Handler_Details.md
 生命週期 → Lifecycle
 傳輸底層 → Transport
 專題導航 → README
+跨主題 ID 字典 → Mapping
 ```
 
 任何新文件都必須先回答：「為什麼不能更新現有主文件？」若無合理答案，就不要新增。
