@@ -11,19 +11,7 @@
 
 先找到主題主文件，再閱讀其證據、協定、欄位與狀態章節。若發現矛盾，回到 `[C]`、`[RES]`、`[WIKI]` 的原始證據，而不是用另一份摘要取代主文件。
 
-### 證據標記
-
-| 標記 | 意義 |
-|---|---|
-| `[C]` | `PaperMan.exe.c` 的直接反編譯證據 |
-| `[RES]` | `Extracted/` 遊戲資源或資料檔證據 |
-| `[WIKI]` | 日本 PaperMan Wiki 的歷史玩家可見資料 |
-| `[X]` | 兩種以上獨立來源交叉吻合 |
-| `[OPEN]` | 尚未充分確認 |
-
----
-
-# 一、研究總入口
+## 一、研究總入口
 
 | 文件 | 定位 |
 |---|---|
@@ -31,7 +19,7 @@
 | [Core/README.md](Core/README.md) | 核心遊戲機制與文件導航 |
 | [KickVote/README.md](KickVote/README.md) | Kick Vote 專題主入口 |
 
-# 二、基礎傳輸、封包與 Dispatcher
+## 二、基礎傳輸、封包與 Dispatcher
 
 | 文件 | 定位 |
 |---|---|
@@ -40,19 +28,17 @@
 | [Core/Y_TCP_INF_Transport.md](Core/Y_TCP_INF_Transport.md) | `Y_TCP_INF` 傳輸層行為與資料流 |
 | [Core/ClientData_Shared_Decoder_Field_Evidence.md](Core/ClientData_Shared_Decoder_Field_Evidence.md) | 共用 decoder 與欄位讀取證據 |
 
-# 三、登入、玩家資料與房間前置狀態
+## 三、登入、玩家資料與房間前置狀態
 
 | 文件 | 定位 |
 |---|---|
-| [Core/Login_681_Server_Record_Field_Schema.md](Core/Login_681_Server_Record_Field_Schema.md) | `681` 與 Server Record 欄位配置 |
-| [Core/Login_Adjacent_680_696_Field_Schema.md](Core/Login_Adjacent_680_696_Field_Schema.md) | `680–696` 鄰近登入封包與欄位 schema |
-| [Core/MyInfo_198_ClientData_Field_Schema.md](Core/MyInfo_198_ClientData_Field_Schema.md) | `198` ClientData 欄位 schema |
-| [Core/MyInfo_198_Composite_Codec_Evidence.md](Core/MyInfo_198_Composite_Codec_Evidence.md) | `198` composite codec 與資料流證據 |
+| [Core/Login_Adjacent_680_696_Field_Schema.md](Core/Login_Adjacent_680_696_Field_Schema.md) | `680–696` 登入鄰近協定、`681` server-list record 與登入鏈 |
+| [Core/MyInfo_198_ClientData_Field_Schema.md](Core/MyInfo_198_ClientData_Field_Schema.md) | `198` composite ClientData 完整結構與驗證 |
 | [Core/Player_Slot_Team.md](Core/Player_Slot_Team.md) | Player slot、Team、玩家位置與隊伍狀態 |
-| [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character、Inventory、Equipment 主文件與深入證據 |
+| [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character、Inventory、Equipment、Weapon 與 Resource 關係 |
 | [Core/Currency_State_Field_Evidence.md](Core/Currency_State_Field_Evidence.md) | 貨幣與玩家狀態欄位證據 |
 
-# 四、Channel、Lobby、Room 與 GameRule
+## 四、Channel、Lobby、Room 與 GameRule
 
 | 文件 | 定位 |
 |---|---|
@@ -64,7 +50,7 @@
 | [Core/GameRule_Lifecycle.md](Core/GameRule_Lifecycle.md) | GameRule 生命週期與狀態機 |
 | [Core/Server_State_Model.md](Core/Server_State_Model.md) | Server-side 狀態模型與同步關係 |
 
-# 五、遊戲模式與模式設定
+## 五、遊戲模式與模式設定
 
 | 文件 | 定位 |
 |---|---|
@@ -73,7 +59,7 @@
 | [Core/Gameplay_166_DeepEvidence.md](Core/Gameplay_166_DeepEvidence.md) | `166` Gameplay、死亡、K/D、結果與相關深入證據 |
 | [Core/Gameplay_Network_Events.md](Core/Gameplay_Network_Events.md) | Gameplay network event 與事件鏈 |
 
-# 六、戰鬥、傷害、移動與武器
+## 六、戰鬥、傷害、移動與武器
 
 | 文件 | 定位 |
 |---|---|
@@ -83,7 +69,7 @@
 | [Core/UDP_Move_Inf_DeepEvidence.md](Core/UDP_Move_Inf_DeepEvidence.md) | UDP 8/24、Queue、27-byte actor record 與欄位證據 |
 | [Core/DropWeapon_Protocol.md](Core/DropWeapon_Protocol.md) | 丟棄武器封包與流程 |
 
-# 七、Packet 欄位細節與結果協定
+## 七、Packet 欄位細節與結果協定
 
 | 文件 | 定位 |
 |---|---|
@@ -94,14 +80,14 @@
 | [Core/Result_Stat_Protocol_223_245_381_389.md](Core/Result_Stat_Protocol_223_245_381_389.md) | `223/245/381/389` Result/Stat 協定 |
 | [Core/Score_State.md](Core/Score_State.md) | Score 與計分狀態 |
 
-# 八、Quest、Event 與資源模型
+## 八、Quest、Event 與資源模型
 
 | 文件 | 定位 |
 |---|---|
 | [Core/Quest_Event_ID_Mapping.md](Core/Quest_Event_ID_Mapping.md) | Quest/Event 與 ID mapping |
 | [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | 遊戲資源封裝與資料模型 |
 
-# 九、Kick Vote
+## 九、Kick Vote
 
 | 文件 | 定位 |
 |---|---|
@@ -111,26 +97,11 @@
 | [KickVote/UI_State.md](KickVote/UI_State.md) | 投票 UI、狀態機、計時器與候選清單 |
 | [KickVote/Master_Room.md](KickVote/Master_Room.md) | `396/397` Master/Room 層協定 |
 
----
+## 十、整合規則
 
-# 十、文件角色與整合規則
+同一主題應有一份主文件。深入證據、欄位表、生命週期與協定內容只有在責任真正不同時才拆分；不得因研究角度不同而複製整份結論。
 
-| 問題 | 首選位置 |
-|---|---|
-| 完整生命週期與狀態轉移 | `*Lifecycle.md` |
-| 封包建立、傳送、接收與整體格式 | `*Protocol.md` |
-| 欄位型別、寬度、位置與資料結構 | `*Schema.md` |
-| 欄位直接證據 | `*Field_Evidence.md`／主文件相關章節 |
-| 跨函式、跨資源、跨來源證據鏈 | `*DeepEvidence.md` 或主題深入章節 |
-| 單一狹窄封包的深入拆解 | `*Detail.md` |
-| 目前保存的狀態 | `*State.md` |
-| 目錄入口 | `README.md` |
-
-同一主題若已存在主文件，後續應直接擴充主文件。只有內容在證據來源、協定層級或生命週期上真正不同時才拆分。
-
-## 十一、已完成的文件整合
-
-以下重複文件已將內容併入主文件，原文件不再維護：
+本輪已完成的整合：
 
 ```text
 Character_Inventory_Equipment_DeepEvidence.md
@@ -144,17 +115,21 @@ UDP_Move_Inf_Field_Semantics.md
 
 TCP_269_Subtype7_Result_State.md
     → TCP_269_Subtype7_Field_Detail.md
+
+MyInfo_198_Composite_Codec_Evidence.md
+    → MyInfo_198_ClientData_Field_Schema.md
+
+Login_681_Server_Record_Field_Schema.md
+    → Login_Adjacent_680_696_Field_Schema.md
 ```
 
-整合原則是保留證據、反證與 `[OPEN]` 邊界，而不是用較短的摘要覆蓋較完整的研究。
+原文件刪除前，內容必須已逐項保留；未知欄位、反證與 `[OPEN]` 不得在整合過程中消失。
 
-## 十二、禁止的文件演化方式
+## 十一、禁止再次失控
 
-- 同一封包在多份文件各自維護不同欄位表。
-- 建立 `New`、`Final`、`Final2`、`Latest`、`Copy` 等平行副本。
-- 把 `[OPEN]` 猜測改寫為 confirmed 卻沒有新增證據。
-- 把不同年份或地區版本無標記地混入 2016 Japan final Client。
-- 只更新細節文件而不更新主文件、入口與索引。
-- 使用簡體中文撰寫新的 Markdown 說明。
-
-文件的目的應該是增加可追溯知識，而不是增加副本。
+- 同一 Packet 出現多份不同欄位真相。
+- 建立 `New`、`Final`、`Final2`、`Latest`、`Copy` 等副本。
+- 把猜測改成 confirmed 而沒有新證據。
+- 把其它版本／地區資料無標記混入 2016 Japan final Client。
+- 只更新子文件，不同步主文件、入口與索引。
+- 新增 Markdown 時使用簡體中文說明文字。
