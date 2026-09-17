@@ -1,6 +1,6 @@
 # 2026-09-18 UDP Peer Handshake／Endpoint Field Evidence
 
-> Target: 日本版 PaperMan 2016 年服務終了時の最終 Client。
+> Target: 日本版 PaperMan 2016 年服務終了時的最終 Client。
 > 本文件專門保存 UDP peer/bootstrap maintenance family 的 byte-level parser/serializer 與 state lifecycle；不把它與 `Y_UDP_S_MOVE_INF` gameplay snapshot 混為一談。
 
 ## 1. Socket / endpoint object boundary
@@ -375,7 +375,107 @@ This is direct evidence that the game can communicate both with a configured UDP
 
 It is not sufficient to infer that all gameplay UDP is peer-to-peer; endpoint addressing is only one transport capability. `Y_UDP_S_MOVE_INF` remains a separate message family.
 
-## 13. Confirmed field schemas
+## 13. Ping-like player quality state: opcode 22 / 154
+
+### UDP opcode 22: `sub_5964E0`
+
+The handler first reads:
+
+```text
+u8 mode/record flag
+```
+
+Only when this value is `1` does it parse the remaining body:
+
+```text
+u8 count
+count × (
+    u8 player identity
+    u32 ping-like value
+)
+```
+
+Each value is stored into:
+
+```text
+dword_F6D9E8[slot]
+```
+
+indexed by the same 16-slot identity table `dword_F6DCF4`.
+
+### UDP opcode 154: `sub_5965D0`
+
+Parses:
+
+```text
+u8 count
+count × (
+    u8 player identity
+    u8 ping-like value
+)
+```
+
+and writes the value into the **same** `dword_F6D9E8[slot]` table.
+
+Thus opcode 22 and opcode 154 are two different wire-width producers feeding one common per-player quality/latency presentation state.
+
+### UI consumer
+
+Result-screen UI code reads `dword_F6D9E8[slot]`, passes it to:
+
+```text
+sub_9A8F40(value)
+```
+
+then constructs resource key:
+
+```text
+Ping_%d
+```
+
+### Ping category thresholds
+
+`sub_9A8F40()` directly maps the stored value:
+
+```text
+value < 100      → category 5
+100..199         → category 4
+200..299         → category 3
+300..999         → category 2
+1000..4999       → category 1
+>= 5000          → category 0
+```
+
+This proves `dword_F6D9E8` is consumed as a ping/latency-classification value, although the exact unit of opcode-154's 1-byte value remains unresolved.
+
+## 14. Protocol registration relation
+
+The protocol symbol registration directly defines:
+
+```text
+153 UDP_ALL_PING_REQ
+154 UDP_ALL_PING_ACK
+155 Y_UDP_C_HOLE_INF
+156 Y_UDP_S_HOLE_INF
+157 UDP_TCP_DEAD_REQ
+158 UDP_TCP_DEAD_ACK
+159 TCP_UDP_DEAD_REQ
+160 TCP_UDP_DEAD_ACK
+161 UDP_TCP_LIVE_REQ
+```
+
+The examined `sub_595E80` receive switch contains `154` and `158`, but not `153/155/156/157/159/160/161`.
+
+Therefore for this Client executable:
+
+```text
+154 receiver = confirmed
+155/156 receiver = not present in this UDP receive dispatcher
+```
+
+The absence from this Client-side switch does **not** prove global protocol absence; it only establishes that this particular receive dispatcher does not handle them.
+
+## 15. Confirmed field schemas
 
 | Opcode | Direction | Payload |
 |---:|---|---|
@@ -386,8 +486,10 @@ It is not sufficient to infer that all gameplay UDP is peer-to-peer; endpoint ad
 | 12 | inbound | `u8 count` + `count × (u8 identity + 16-byte endpoint)` |
 | 13 | inbound | `u8 identity + u32 timing-like value` |
 | 14 | inbound | `u8 identity + u32 timing-like value` |
+| 22 | inbound | `u8 mode/record flag=1` + `u8 count` + `count × (u8 identity + u32 ping-like value)` |
+| 154 | inbound | `u8 count` + `count × (u8 identity + u8 ping-like value)` |
 
-The outbound schemas constructed by the same functions are:
+The outbound schemas constructed by the peer-response functions are:
 
 ```text
 5  = u8 local identity + u32 timing-like value
@@ -396,7 +498,7 @@ The outbound schemas constructed by the same functions are:
 14 = u8 local identity + u32 timing-like value
 ```
 
-## 14. Current state machine model
+## 16. Current state machine model
 
 ```text
 Configured UDP socket
@@ -418,6 +520,16 @@ handshake state A4/A5
 6 / 14 final response/update
         ↓
 peer readiness / timeout checks
+
+Parallel quality path:
+UDP_ALL_PING_ACK (154)
+    + opcode 22 player ping records
+    ↓
+dword_F6D9E8[slot]
+    ↓
+sub_9A8F40
+    ↓
+Ping_1..Ping_5 presentation category
 ```
 
-The exact protocol intention is still `[OPEN]`, but the byte schemas and endpoint/state transitions above are direct Client-side evidence.
+The exact protocol intention is still `[OPEN]`, but the byte schemas, endpoint/state transitions, and ping-quality consumer are direct Client-side evidence.
