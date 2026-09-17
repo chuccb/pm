@@ -66,25 +66,25 @@ Login
 
 ### Channel／Lobby／Room／Player／GameRule
 
-- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` top-level packet evidence。
-- [`Channel_Lobby_Lifecycle.md`](Channel_Lobby_Lifecycle.md)：Channel → Lobby → Room 高階生命週期。
-- [`Room_Channel_GameRule_101_192_Field_Evidence.md`](Room_Channel_GameRule_101_192_Field_Evidence.md)：`101–192` packet、parser、serializer 與欄位證據。
-- [`Room_Settings_Packets.md`](Room_Settings_Packets.md)：Room selector/value、設定封包與 UI data-flow。
-- [`Map_And_Room.md`](Map_And_Room.md)：Map/Room 交叉索引與未閉合問題。
-- [`GameRule_Lifecycle.md`](GameRule_Lifecycle.md)：CGameRule、Ready/Start/End/Leave 與生命週期因果。
-- [`Player_Slot_Team.md`](Player_Slot_Team.md)：16-slot、Player ID、Slot、Team/Group 與玩家有效狀態。
+- [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md)：Channel → Lobby → Room、Player Slot／Team、Map、Room selector 與 CGameRule 生命週期的大方向主文件。
+- [`Room_Channel_GameRule_101_192_Field_Evidence.md`](Room_Channel_GameRule_101_192_Field_Evidence.md)：`101–192` 精確 packet、parser、serializer 與欄位證據。
+- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` 精確 top-level packet evidence。
+- [`Room_Settings_Packets.md`](Room_Settings_Packets.md)：Room selector/value、設定封包與 UI data-flow 的詳細證據。
 - [`Server_State_Model.md`](Server_State_Model.md)：跨子系統 Server reconstruction 抽象模型。
+
+`GameRule_Lifecycle.md`、`Channel_Lobby_Lifecycle.md`、`Map_And_Room.md`、`Player_Slot_Team.md` 的大方向內容已整合至 `Room_Lobby_GameRule.md`；舊檔已移除或僅保留必要遷移痕跡，不再作為研究主文件。
 
 ### Gameplay／戰鬥／移動／武器
 
 - [`Mode_Rules.md`](Mode_Rules.md)：遊戲模式規則與版本差異。
 - [`Mode_Option_Tables.md`](Mode_Option_Tables.md)：mode-specific selector index/value。
 - [`Gameplay_166_DeepEvidence.md`](Gameplay_166_DeepEvidence.md)：`166` Gameplay event family 深入證據。
-- [`Combat_Hit_Detection.md`](Combat_Hit_Detection.md)：命中與戰鬥事件。
-- [`Damage_Calculation.md`](Damage_Calculation.md)：傷害計算與 Runtime modifier。
 - [`Y_TCP_INF_Damage.md`](Y_TCP_INF_Damage.md)：`165/166 Y_TCP_INF` gameplay/event family。
+- [`Combat_Damage.md`](Combat_Damage.md)：Hit Detection、Combat geometry、Damage modifier 與 `165` 建包前計算的整合主文件。
 - [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md)：UDP movement actor record 與欄位證據。
-- [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：丟棄武器流程。
+- [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：丟棄／拾取武器流程。
+
+`Combat_Hit_Detection.md` 與 `Damage_Calculation.md` 已整合至 `Combat_Damage.md`，不再作為獨立主文件。
 
 ### Result／Quest／Resource
 
