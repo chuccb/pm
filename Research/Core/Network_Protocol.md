@@ -1,53 +1,42 @@
 # PaperMan 2016 JP — 網路、封包傳輸、Dispatcher 與 UDP Movement 整合研究
 
 > 目標版本：日本版 PaperMan 2016 年服務終了時的最終 Client。
-> 更新基準：2026-09-17。
-> 文件責任：集中 TCP/UDP transport、frame、integrity/XOR、checksum、共用 codec、packet submission、opcode dispatcher，以及 UDP `Y_UDP_S_MOVE_INF` 的 Queue／actor record 證據。具體 gameplay semantic 仍回對應主題文件。
+> 更新基準：2026-09-18。
+> 本文件是 Network／Packet／UDP Movement 的 canonical protocol truth；具體 gameplay semantic 仍回對應 domain 文件。
+> 本輪已直接重新檢查上傳的 `PaperMan.exe` 原始二進位，並以其 PE／machine-code 與 `PaperMan.exe.c` 交叉驗證。
 
 ## 1. 一眼看懂
 
 ```text
-Socket / stream
-    ↓
-receive buffer / queue
-    ↓
-outer frame / Packet
-    ↓
-integrity / transform
-    ↓
-opcode dispatcher
-    ↓
-packet-specific parser
-    ↓
+TCP stream / UDP datagram
+        ↓
+Packet internal buffer
+        ↓
+8-byte outer frame
+        ↓
+checksum / XOR / transform
+        ↓
+opcode dispatch
+        ↓
+packet parser
+        ↓
 state / gameplay consumer
 ```
 
-TCP 與 UDP 在 transport/dispatch 層分開：
+TCP 與 UDP 在 transport 層不同，但兩者都使用 `Packet` family 的 fixed-width codec 與外層 frame machinery。[C][EXE]
 
-```text
-TCP
-→ stream reassembly
-→ frame
-→ sub_58B010
+---
 
-UDP
-→ recvfrom
-→ sub_595E80
-→ opcode handler
-→ movement queue
-→ central update consumer
-```
+## 2. TCP socket / connection
 
-## 2. TCP socket 與 connection
-
-至少存在兩個主要 TCP ClientSocket：
+至少存在：
 
 ```text
 dword_131F730 → Login / Account TCP
 dword_1321D00 → Lobby / Gameplay TCP
 ```
 
-兩者都是：
+兩者均使用：
 
 ```text
 AF_INET
@@ -55,220 +44,375 @@ SOCK_STREAM
 IPPROTO_TCP
 ```
 
-具體 Login、Room、Gameplay packet semantic 不在此重複。[C]
+`dword_1321D00` 是主要 Lobby / Gameplay send path；`sub_555090()` 最終以 `WSASend()` 完整送出 Packet frame。[C]
 
-## 3. TCP frame reassembly
+---
 
-一次 `WSARecv()` 可能得到：
+## 3. Packet outer frame：raw layout 已可確認
 
-```text
-部分 frame
-一個完整 frame
-多個連續 frame
-```
-
-outer frame：
+`Packet::sub_591DA0()` 直接建立 pointer：
 
 ```text
-+0x00 u16 logical_length
-+0x02 u16 opcode
-+0x04 u16 integrity / XOR field
-+0x06 u16 auxiliary field
-+0x08 payload
+this + 8  → this + 24
+this + 12 → this + 26
+this + 16 → this + 28
+this + 20 → this + 30
+this + 19232 → this + 32
 ```
 
-總傳送長度：
+因此以 physical frame 起點 `P = Packet + 24`：
 
 ```text
-logical_length + 8
+P+0x00  u16  logical/current payload length
+P+0x02  u16  opcode
+P+0x04  u16  integrity/checksum-related word
+P+0x06  u16  transform auxiliary / previous-length state
+P+0x08  payload / transformed bytes
 ```
 
-Client 只有在 buffer 至少具備完整 frame 時才處理；完成後移除恰好一個 frame，餘下 bytes 留給下一個 frame。[C]
-
-`sub_591FB0()` 將新收到的 bytes append 到 `Packet` 的 internal buffer；`sub_591D50()` 檢查目前 buffered bytes 是否至少包含完整 frame；完成 dispatch 後 receive loop 會扣除該 frame 長度並將剩餘 bytes 前移，故 TCP parser 必須支援 fragmentation 與 coalescing。[C]
-
-因此 Server 不得假設：
+直接 accessor：
 
 ```text
-一次 recv = 一個 packet
+sub_591EC0(packet, opcode) → *(P+0x02) = opcode
+sub_591EE0(packet)         → read *(P+0x02)
+sub_591F00(packet)         → read *(P+0x04)
+sub_591F20(packet, len)    → write current length at *(P+0x00)
+sub_591F90(packet, value)  → write auxiliary length at *(P+0x06)
 ```
 
-## 4. Integrity / XOR / checksum
+這些不是 Hex-Rays local-field 猜測；pointer target 在 `sub_591DA0()` 中直接指向 `P+0/P+2/P+4/P+6`。[C]
 
-共用流程：
+Physical frame length：
+
+```text
+frame_bytes = logical/current_length + 8
+```
+
+TCP sender `sub_555090()` 與 UDP generic sender `sub_595900()` 都直接使用：
+
+```text
+buffer = packet + 24
+length = sub_591F00(packet) + 8
+```
+
+[C][EXE]
+
+---
+
+## 4. TCP stream reassembly：sticky / partial frame confirmed
+
+`sub_591FB0()` 把新收到的 bytes append 到 persistent Packet buffer；`sub_591D50()` 檢查：
+
+```text
+frame length >= 8
+buffered bytes >= declared frame size
+```
+
+TCP receive loop 在 frame 完成後只消費該 frame，剩餘 bytes 留在 receive buffer 並前移，因此 Client 明確支援：
+
+```text
+partial frame across multiple recv
+multiple frames in one recv
+```
+
+所以 Server 不可使用：
+
+```text
+one recv == one packet
+```
+
+作為 framing 假設。[C]
+
+---
+
+## 5. Checksum / XOR integrity
+
+共用完整性流程：
 
 ```text
 sub_592220
-    → payload bit-popcount checksum
+    → 對 payload bytes 做 bit-popcount 累加
 
 sub_5923D0
-    → checksum setup
+    → 計算 checksum
     → sub_592470
 
 sub_592470
-    → payload byte XOR header +0x04 low byte
+    → payload byte XOR header P+0x04 low byte
 
 sub_592420
     → reverse XOR
-    → recompute checksum
-    → compare header +0x04
+    → 重新計算 checksum
+    → compare P+0x04
 ```
 
-因此：
+`sub_592220()` 的 checksum 演算法是每 byte 計數 set bits，再累加到 16-bit。[C]
 
-```text
-header +0x04
-    = integrity value + XOR mask source
-```
-
-尚無充分證據稱它是 cryptographic key。[C][OPEN]
-
-### 4.1 Checksum
-
-`sub_592220()` 對每個 payload byte 計算 bit-popcount，再累加成 16-bit value。[C]
-
-安全名稱：
+安全命名：
 
 ```text
 PayloadBitCountChecksum : ushort
 ```
 
-不可自行替換成 CRC/MD5 等其它 checksum。
+不能命名成 CRC、MD5 或 cryptographic MAC。[C]
 
-### 4.2 Header +0x06
-
-`+0x06` 參與 transform / validation path；`sub_592E50()`、`sub_592E90()`、`sub_592F60()`、`sub_5930C0()` 代表另外的 data transform / validation stages，但目前尚未有足夠證據把 `+0x06` 單獨命名成 compression length、sequence 或 crypto field。[C][OPEN]
-
-暫名：
+目前最保守的 `P+0x04` 名稱：
 
 ```text
-header_aux_u16
+IntegrityWord
 ```
 
-## 5. 共用 fixed-width codec
+它同時參與 XOR mask 與 integrity 驗證；目前沒有證據把它命名為真正的 encryption key。[C][OPEN]
 
-目前主要 helper：
+---
+
+## 6. Packet transform flags：compression + block cipher 已直接閉合
+
+Packet 內部 flag byte 位於：
 
 ```text
-u8 read/write → sub_592900 / sub_592920 / sub_592940 / sub_592960 / sub_592980
-u16 read/write → sub_5929C0 / sub_5929E0 / sub_592A00
-u32 read/write → sub_592A20 / sub_592A40 / sub_592A60 / sub_592A80 / sub_592AA0 / sub_592AC0 / sub_592B20 / sub_592B40
-u64/raw8       → sub_592AE0 / sub_592B00 / sub_592B60 / sub_592B80
-string         → sub_5926F0 / sub_592730
-raw            → sub_592500 / sub_592580
+Packet + 0x4B34
 ```
 
-直接 source 已重新核對：
+目前已直接確認：
 
 ```text
-sub_592900 / 920 / 940 / 960 / 980 = 1 byte
-sub_5929C0 / 9E0 / A00             = 2 bytes
-sub_592A20 / A40 / A60 / A80 / AA0 / AC0 = 4 bytes
-sub_592AE0 / B00 / B60 / B80       = 8 bytes
-sub_592B20 / B40                    = 4 bytes
+bit 0x01 → compression stage already applied
+bit 0x02 → decompression stage already applied
+bit 0x04 → block-cipher transform stage already applied
+bit 0x08 → inverse block-cipher transform stage already applied
 ```
 
-特別重要：
+### 6.1 Compression
+
+`sub_592D30()`：
 
 ```text
-Hex-Rays local prototype ≠ wire width
+if bit 1 already set → no-op
+count = current length
+sub_591600(payload, dst, count)
+if compressed result is smaller:
+    copy dst back to payload
+    P+0x06 = old length
+    P+0x00 = compressed length
+set flag 0x01
 ```
 
-例如 `sub_592B20()` 的表面 prototype 看起來只接 `char`，實際呼叫 `sub_592580(..., 4u)`，所以 wire width 是 4 bytes。[C]
+`sub_591600()` 是 dictionary/LZ-style compressor，使用 1024-distance domain 與 compact reference token；每 8 個 token 使用 control bits。[C]
 
-同樣，local array 大小也不能當成 wire width。`sub_602E30()` 的 `_BYTE v25[16]` 並不代表一次讀取 16 bytes；該 call-site 只呼叫一次 `sub_592940()`，實際只消耗 1 byte。[C]
-
-## 6. TCP receive dispatcher
-
-frame 完成後進：
+`sub_591900()` 是對應 decompressor：
 
 ```text
-sub_58B010(..., packet)
+reference length   = (*src >> 2) + 3
+reference distance = _byteswap_ushort(*src) & 0x3FF
 ```
 
-共通 receive hook 還會經：
+### 6.2 AES/Rijndael block cipher：已由原始 EXE 直接驗證
+
+上傳的原始 `PaperMan.exe`：
 
 ```text
-sub_407360
-CGameRule::sub_67CF90
-opcode = sub_591EE0(packet)
+PE32 / i386
+ImageBase = 0x00400000
 ```
 
-目前直接看到的主要 server-originated route：
+原始 machine code 中：
 
 ```text
-160 → sub_58D790
-166 → sub_58D820 → sub_749B90
-168 → sub_56F410
-170 → sub_56F4F0
-172 → sub_56F5D0
-174 → sub_56F6B0
-176 → sub_56F790
+0x403430  → key-schedule initialization
+0x403650  → 16-byte block encrypt path
+0x403A20  → inverse block path
+0x403DE0  → block transform wrapper
+0x404040  → inverse block transform wrapper
+0x4042A0  → multi-block mode wrapper
+0x404470  → inverse multi-block mode wrapper
 ```
 
-另承接 `101–221`、`223–245`、`269` 等 family；精確 payload 由各主題文件維護。[C]
+`0x403430` 直接設定：
 
-## 7. TCP submission
+```text
+n16 = 16
+n16_0 = 16
+n10 = 10
+```
 
-主要 submission：
+並產生 **44 個 32-bit round-key words**。
+
+同一區域使用的 `byte_B66C08` 是標準 AES S-box；四組 `dword_B68E08/B69208/B69608/B69A08` 是 AES T-table style round tables。`0x403650`/`0x403A20` 每次處理 16-byte block。[C][EXE]
+
+因此目前 algorithm-level 結論：
+
+```text
+block size = 16 bytes
+key size   = 128 bits
+rounds     = 10
+algorithm  = AES / Rijndael-128 class implementation
+```
+
+Confidence：**Confirmed at algorithm level**。
+
+原始 EXE 還可直接看到 key-schedule 的 16-byte static key material 位於 `VA 0x00B69E88`；其後使用標準 AES Rcon sequence `01 02 04 08 10 20 40 80 ...`。[EXE]
+
+> Exact key bytes 可由原始 EXE 直接重建；此文件只記錄其存在與用途，避免把「static key material」與 packet header field 混為一談。
+
+### 6.3 Packet 與 AES 的直接關係
+
+不是單純「EXE 有 AES library」。`sub_592FB0()` 直接呼叫：
+
+```text
+sub_4042A0(
+    packet payload,
+    temporary buffer,
+    block-aligned length,
+    global mode = 2
+)
+```
+
+因此 Packet 的 `bit 0x04` stage **確實進入這套 16-byte AES/Rijndael class block cipher**。[C][EXE]
+
+`sub_593110()` 是對應 inverse stage，並要求 block-aligned length；它將 transform 前保存的 length state 恢復到 Packet length machinery。[C]
+
+目前尚不能在沒有更多 runtime/ASM context 前，把 `mode = 2` 直接命名成 CBC/CTR/CFB/OFB 某一標準模式；其實作包含自訂 mode wrapper。故：
+
+```text
+AES block transform = Confirmed
+exact mode/IV semantics = OPEN
+```
+
+### 6.4 Transform order
+
+Outbound `sub_593280()`：
+
+```text
+initial auxiliary length state
+    ↓
+optional compression (bit 0x01)
+    ↓
+block cipher transform (bit 0x04)
+    ↓
+checksum / send validation
+```
+
+Receive `sub_593320()`：
+
+```text
+inverse block transform (bit 0x08)
+    ↓
+optional decompression (bit 0x02)
+    ↓
+final dispatch
+```
+
+Flag order本身可由 caller graph 建立；但 `P+0x06` 在不同 transform stage 中保存前一層 length，故不應僅將它固定命名成「uncompressed length」或「plaintext length」。安全名稱是：
+
+```text
+TransformPreviousLength : u16
+```
+
+其具體數值在每一 stage 的生命週期仍需逐 branch 關閉。[C][OPEN]
+
+---
+
+## 7. Send / receive submission
+
+主要 TCP send：
 
 ```text
 packet
-  → sub_58D7D0
-  → sub_555090(&dword_1321D00, packet)
-  → socket / send queue
+ → sub_58D7D0
+ → sub_555090(&dword_1321D00, packet)
+ → WSASend loop
 ```
 
-`sub_602E00()` 是 conditional front-end：
+`sub_555090()` 不假設一次 WSASend 就完成全部 bytes；它會：
 
 ```text
-sub_602E00
-    → special-condition check
-    → normal case sub_58D7D0
+Buffers.buf += NumberOfBytesSent
+Buffers.len -= NumberOfBytesSent
 ```
 
-不是另一套 transport。[C]
+直到整個 frame 送完。[C]
 
-## 8. UDP transport architecture
+失敗時會區分：
 
-UDP 不經 `sub_58B010`：
+```text
+WSAEWOULDBLOCK → Sleep(1) → retry
+other network errors → error handler
+```
+
+這是 client-side partial-send evidence。[C]
+
+---
+
+## 8. UDP architecture
+
+UDP manager：
 
 ```text
 CUDPManager::sub_595840
     → sub_595A60
     → recvfrom
+    → Packet validation / transform
     → sub_595E80
     → UDP opcode handler
 ```
 
-UDP socket 明確建立為：
+`CUDPSocket`：
 
 ```text
 socket(AF_INET, SOCK_DGRAM, 0)
 ```
 
-`CUDPSocket` constructor 的預設 port-like member 為 `27000`；`sub_596DA0()` 建立/儲存 local bind 與 remote address，`sub_596EB0()` / `sub_596F00()` / `sub_596F50()` 是 sendto wrappers，`sub_596F90()` / `sub_596FF0()` 是 recvfrom wrappers。[C]
+constructor 中 default port-like member：
 
-`CUDPManager::sub_595840()` 為永久 thread loop，持續呼叫 `sub_595A60()` 後 `_sleep(1)`。[C]
+```text
+27000
+```
 
-### 8.1 UDP packet framing
+`sub_596DA0()`：
 
-`sub_595A60()` 收到 datagram 後：
+```text
+local bind = 0.0.0.0 : configured local port
+remote configured sockaddr = supplied IP/port
+```
+
+`sub_596E60()` 儲存另一組 configured destination sockaddr。
+
+send wrappers：
+
+```text
+sub_596EB0 → sendto(this+24)
+sub_596F00 → sendto(this+40)
+sub_596F50 → sendto(caller sockaddr)
+```
+
+receive wrappers：
+
+```text
+sub_596F90 → recvfrom(this+60)
+sub_596FF0 → recvfrom(caller sockaddr)
+```
+
+[C][EXE]
+
+---
+
+## 9. UDP Packet framing
+
+`sub_595A60()`：
 
 ```text
 recvfrom(..., 9600)
 → sub_591FB0(Packet, bytes, received_length)
 → sub_591D50(Packet)
-→ received_length >= logical_length + 8
+→ received_length >= frame length
 → sub_5930C0(Packet)
-→ sub_595E80(...)
+→ sub_595E80(..., Packet)
 ```
 
-因此 UDP 在這個 client 中仍使用與 `Packet` 類似的內部 frame/transform model；不能把 UDP gameplay record 直接當成裸 payload 而跳過這層驗證。[C]
+因此 UDP datagram 亦不是裸 gameplay body；它仍受 `Packet` outer frame 與 transform machinery 處理。[C]
 
-### 8.2 UDP receive dispatch
-
-`sub_595E80()` 的 direct switch：
+UDP receive manager direct cases：
 
 ```text
 2   → sub_593A60
@@ -295,149 +439,227 @@ recvfrom(..., 9600)
 158 → sub_596910
 ```
 
-因此 UDP opcode/type space 明顯不只一種 movement packet。[C]
+完整 TCP dispatcher map 另存於 `Network_Dispatcher_Inventory.md`。[C]
 
-## 9. UDP `Y_UDP_S_MOVE_INF`：8/24
+---
 
-`sub_596940()` 有明文診斷：
+## 10. UDP peer / endpoint architecture
+
+Client maintains a 16-player endpoint table keyed by player/actor identity，不能假設 identity == slot。[C]
+
+Per-slot endpoint areas：
+
+```text
+unk_F6D584 + 240780*slot
+    → learned peer endpoint/address state
+    → 16 bytes
+
+unk_F6D594 + 240780*slot
+    → local/source sockaddr captured for peer-response path
+    → 16 bytes
+```
+
+identity lookup：
+
+```text
+dword_F6DCF4[60195*slot]
+```
+
+UDP peer-addressed traffic uses caller-supplied sockaddr and `sendto()`。[C]
+
+### 10.1 Endpoint maintenance family
+
+```text
+opcode 4 inbound
+    = u8 count + count × (u8 identity + 16-byte endpoint)
+    → update F6D584
+    → fan-out opcode 5
+
+opcode 5 inbound
+    = u8 identity + u32 timing-like value
+    → capture source endpoint
+    → first-arrival state transition
+    → emit opcode 6
+
+opcode 6 inbound
+    = u8 identity + u32 timing-like value
+    → finalize/capture peer source endpoint state
+
+opcode 10 inbound
+    = u8 identity + 16-byte endpoint
+    → update F6D584
+    → emit opcode 13
+
+opcode 12 inbound
+    = u8 count + count × (u8 identity + 16-byte endpoint)
+    → bulk F6D584 update
+    → emit opcode 13 fan-out
+
+opcode 13 inbound
+    = u8 identity + u32 timing-like value
+    → capture source endpoint
+    → emit opcode 14 on first arrival
+
+opcode 14 inbound
+    = u8 identity + u32 timing-like value
+    → terminal receive-side state update
+```
+
+Peer response packets 5/6/13/14 constructed by Client all use：
+
+```text
+u8 local identity
+u32 timing-like value = n0x3E8_3
+```
+
+`n0x3E8_3` originates from elapsed-time calculations based on `timeGetTime() - dword_F2563C`; its exact protocol meaning is still `[OPEN]` — do not call it RTT, nonce, sequence or timestamp without additional evidence.[C]
+
+Peer readiness logic has distinct `3000 ms` and `5000 ms` timeout checks.[C]
+
+### 10.2 Ping / player quality side channel
+
+UDP opcode `22`：
+
+```text
+u8 mode/record flag
+if flag == 1:
+    u8 count
+    count × (u8 player identity + u32 ping-like value)
+```
+
+UDP opcode `154`：
+
+```text
+u8 count
+count × (u8 player identity + u8 ping-like value)
+```
+
+Both write the same per-player table：
+
+```text
+dword_F6D9E8[slot]
+```
+
+UI consumer：
+
+```text
+sub_9A8F40(value)
+    → Ping_%d
+```
+
+Thresholds in `sub_9A8F40()`：
+
+```text
+<100       → 5
+100–199    → 4
+200–299    → 3
+300–999    → 2
+1000–4999  → 1
+>=5000     → 0
+```
+
+因此 per-player latency/ping classification state 已有 Client-side direct consumer 證據；opcode 154 的 raw one-byte unit 仍 `[OPEN]`。[C]
+
+---
+
+## 11. UDP `Y_UDP_S_MOVE_INF`: 8 / 24
+
+`sub_596940()` 包含明文：
 
 ```text
 BUGCUDPNetworkManager::OnY_UDP_S_MOVE_INF : [g_byGamePlay : %d]
 ```
 
-且只有 `n15 == 13` 時進入 `sub_593750()`；否則會記錄錯誤並中止該 path。[C]
-
-完整 queue chain：
+僅在：
 
 ```text
-CUDPManager::sub_595840
-    → sub_595A60
-    → recvfrom / Packet validation
-    → sub_595E80
-    → opcode 8 / 24
-    → sub_596940
-    → sub_593750
-    → queue node
-    → sub_593510
-    → sub_602E30
-    → per-actor movement/state decode
+n15 == 13
 ```
 
-### 9.1 `sub_593750()` / queue
+時把 Packet 放進 movement queue。[C]
 
-`sub_593750()` 在 critical section 內將 Packet 插入 queue。[C]
-
-`sub_593510()` 由 central update path 呼叫：
+完整 chain：
 
 ```text
-lock queue
-→ dequeue node
-→ sub_602E30(Packet)
-→ free/cleanup node
+recvfrom
+ → Packet validation / transform
+ → opcode 8 / 24
+ → sub_596940
+ → sub_593750
+ → movement queue
+ → sub_593510
+ → sub_602E30
+ → actor record parser
 ```
 
-另外 `sub_5934B0()` 有 `0x7530 = 30000 ms` 的 timeout test；在指定狀態下 `sub_593510()` 會建立 TCP opcode 697。此 697 path 應視為 UDP/transport health-related control path；其更精確語意仍由 higher-level protocol file 維護。[C][OPEN]
+`sub_593750()` 在 critical section 內 enqueue；central path 再 dequeue、解析、cleanup。[C]
 
-## 10. UDP movement body：目前已重新精確落位
+---
 
-### 10.1 `sub_602E30()` 的 parser
+## 12. Movement actor record：27 bytes，舊 26-byte 結論已永久修正
 
-開頭先讀：
+`sub_602E30()` 先讀：
 
 ```text
 u8 actor_count = N
 ```
 
-每一筆 actor record **不是 27 bytes 的舊版猜測表，也不是 43 bytes**。逐一按 helper 的真實 read width 計算後，確定為：
+每個 actor 的固定部分依 fixed-width helpers 實際消耗：
 
 ```text
-26 bytes / actor
-```
-
-原因是：
-
-```text
-_BYTE v25[16]
-```
-
-只是 local scratch buffer；source 實際只有：
-
-```c
-sub_592940(a1, v25);
-```
-
-而 `sub_592940()` 實際只讀 1 byte。[C]
-
-### 10.2 精確 wire layout
-
-以 actor record 起始位置為 `R`：
-
-```text
-R+00  u8   v28
-R+01  u8   v19
-R+02  u8   n16
-R+03  u32  v30
-R+07  u32  v16
-R+11  u8   v25[0]
-R+12  u16  v35
-R+14  u16  v36
-R+16  u16  v37
-R+18  u8   v23
-R+19  u8   v38
-R+20  u8   v14
-R+21  u8   v15[0]
-R+22  u8   n0x1C
-R+23  u32  v29
++00  u8   v28
++01  u8   v19
++02  u8   n16
++03  u32  v30
++07  u32  v16
++0B  u8   v25[0]
++0C  u16  v35
++0E  u16  v36
++10  u16  v37
++12  u8   v23
++13  u8   v38
++14  u8   v14
++15  u8   v15
++16  u8   n0x1C
++17  u32  v29
 ```
 
 總長：
 
 ```text
-3 + 4 + 4 + 1 + 2 + 2 + 2 + 1 + 1 + 1 + 1 + 1 + 4
-= 26 bytes
+27 bytes = 0x1B
 ```
 
-整個 movement payload 的 actor body：
+完整 fixed actor payload：
 
 ```text
 u8 N
-N × 26-byte actor record
+N × 27-byte fixed actor record
 ```
 
-這是目前以 C parser 為準的正式 byte-level truth。[C]
+**26 bytes 的舊結論是錯誤的；錯誤來源是把 Hex-Rays local scratch array size 當成 wire consumption。** 例如 `v25[16]` 只經一次 `sub_592940()`，實際只讀 1 byte。[C]
 
-### 10.3 目前可以安全命名的欄位
+### 12.1 Actor record fixed-field evidence
 
 ```text
-R+00 v28       → semantics [OPEN]
-R+01 v19       → semantics [OPEN]
-R+02 n16       → Actor/User identity candidate
-R+03 v30       → semantics [OPEN]
-R+07 v16       → movement/sample state candidate [OPEN]
-R+11 v25[0]    → passed into sub_5B3180(actor, byte); state byte candidate [OPEN]
-R+12 v35       → spatial component candidate
-R+14 v36       → spatial component candidate
-R+16 v37       → spatial component candidate
-R+18 v23       → controller/state byte candidate [OPEN]
-R+19 v38       → controller/state byte candidate [OPEN]
-R+20 v14       → controller/state byte candidate [OPEN]
-R+21 v15[0]    → controller/state byte/raw-one-byte candidate [OPEN]
-R+22 n0x1C      → state/action byte candidate [OPEN]
-R+23 v29       → resource/action/sample value candidate [OPEN]
+R+00 → unknown
+R+01 → unknown
+R+02 → actor/player identity candidate
+R+03 → unknown u32
+R+07 → movement/sample scalar candidate
+R+0B → actor state byte candidate
+R+0C → spatial component
+R+0E → spatial component
+R+10 → spatial component
+R+12 → controller/state byte
+R+13 → controller/state byte
+R+14 → controller/state byte
+R+15 → controller/state byte
+R+16 → generic PState/action-state selector candidate
+R+17 → Resource/Action identity candidate
 ```
 
-其中 `n16` 直接流入：
-
-```text
-sub_67DF00(n16)
-sub_67D7D0(n16)
-```
-
-且後者會落到 `<16` 的玩家 slot range，因此 `n16` 是 actor/player identity candidate；但不能直接命名成 SlotIndex。[C][OPEN]
-
-### 10.4 三個 u16 spatial components
-
-C 直接做：
+位置三分量直接：
 
 ```text
 v20 = v35 / 3.0
@@ -445,383 +667,608 @@ v21 = v36 / 3.0
 v22 = v37 / 3.0
 ```
 
-之後把它們作為 player/controller transform sample 的 3D vector 使用。[C]
+然後進 actor transform/snapshot state，因此 `R+0C/R+0E/R+10` 已可安全命名為 quantized spatial components。[C]
 
-因此高度確定：
+`R+02` 進：
 
 ```text
-R+12/R+14/R+16 = 3 個固定點位／空間量化分量
+sub_67DF00(n16)
+sub_67D7D0(n16)
 ```
 
-但 exact axis ordering、world unit、quantization origin 目前仍 `[OPEN]`。
+並在 valid remote slot range `<16` 下取得 player runtime object，因此高度支持 actor/player identity；仍不可直接把 wire value 命名成 SlotIndex。[C]
 
-### 10.5 其餘 byte 欄位不能用 local variable type 猜
-
-`v23`、`v38`、`v14`、`v15[0]`、`n0x1C` 都是獨立的 1-byte wire values，之後進入 controller/state/effect path；目前沒有證據可以把它們直接命名成 crouch、jump、fire、stance、weapon 等特定 enum。[C]
-
-尤其：
+`R+0B` 直接進：
 
 ```text
-local variable name
-local array size
-Hex-Rays guessed type
-```
-
-均不是 wire semantic 的證據。
-
-## 11. Actor state application
-
-每筆 actor record 解析後：
-
-```text
-n16
-  → sub_67DF00(n16)
-  → sub_67D7D0(n16)
-  → player runtime
-```
-
-self/remote actor 判定後，client 會處理 per-slot flags，然後：
-
-```text
-v12[0] = v16
-v12[1] = v35 / 3.0
-v12[2] = v36 / 3.0
-v12[3] = v37 / 3.0
-
 sub_5B3180(actor, v25[0])
-sub_9BCB00(actor, v12)
+```
+
+並寫 actor runtime state `+233`，故它不是 padding。[C]
+
+`R+16` 進：
+
+```text
 sub_5B34B0(actor, v29, n0x1C, v38, v34, n16)
-sub_5B71F0(&v20, n16)
 ```
 
-`sub_9BCB00()` 把新 snapshot/state 寫入 actor interpolation/state structure；因此 `v12` 是至少包含一個非空間 u32 與 3 個空間 float 的 snapshot。[C]
+值 `16..25` 有另外的 10-entry Emotion command/state mapping；但整個欄位是 generic actor action/state machinery，不能全域稱 Emotion。[C]
 
-`sub_5B3180()` 直接把 `v25[0]` 寫入 actor `+233`，證明 R+11 是有語意的 state byte，而不是 padding。[C]
-
-`sub_5B34B0()` 接收：
+`R+17` 進 `sub_548E80()`，而 `sub_548C80()` 對它做 Resource/Action whitelist checks：
 
 ```text
-v29, n0x1C, v38, v34, n16
+0
+BOMBPLANT
+Pulp_A
+Pulp_B
+magic_finger
+Escape
 ```
 
-並進一步參與 controller/effect processing；exact enum mapping 尚 `[OPEN]`。[C]
+以及 actor weapon/resource identity blocks。[C]
 
-`sub_5B71F0()` 會以 `sub_67D7D0(n16)` 找 player slot，並將 `dword_F6DD34[slot]` 經 `sub_568470()` / `sub_9C1B20()` / `sub_62D6C0()` 套入輸入/position-like state；它不是 packet parser 本身，而是 actor update 的後續 state propagation。[C]
+### 12.2 Opcode 23：Client-side fixed-record producer，27 bytes
 
-## 12. UDP send / peer transport
-
-### 12.1 Generic packet send
-
-`sub_595900(packet)`：
+`sub_744450()` 直接建立：
 
 ```text
-len = sub_591F00(packet) + 8
-send local UDP socket from packet + 24
+Packet opcode = 23
 ```
 
-因此 `Packet` object 的 internal base 與 physical datagram buffer 並不是同一個 address。[C]
-
-### 12.2 Peer-address send
-
-`sub_595980()` 可將 packet 封裝成 `logical_length + 8` 後，使用傳入的 address pair 送出；`sub_595A10()` 先以 `sub_595BD0()` 取得目前 peer address。[C]
-
-### 12.3 已確認的 UDP periodic packets
-
-`sub_596180()`：
+並以 fixed-width writer 寫出：
 
 ```text
-每 >= 1000 ms
-→ Packet opcode 17
-→ sub_595900()
++00  u8   *sub_417D00()
++01  u8   byte_EE896D
++02  u8   sub_67D010()
++03  u32  dword_EE8CB4
++07  u32  n0x64_0
++0B  u8   sub_720AA0(1,0)
++0C  u16  (this+16) * 3 + 0.5
++0E  u16  (this+20) * 3 + 0.5
++10  u16  (this+24) * 3 + 0.5
++12  u8   sub_744310() packed state
++13  u8   derived/directional state
++14  u8   derived/directional state
++15  u8   this+848
++16  u8   derived movement/action state
++17  u32  sub_5AA5C0(n9)
 ```
 
-`sub_596670()`：
+逐欄 offset/width 與 inbound 8/24 parser 完全對齊：[C]
+
+| Offset | 8/24 inbound parser | 23 outbound producer |
+|---:|---|---|
+| +00 | `u8 v28` | `u8 *sub_417D00()` |
+| +01 | `u8 v19` | `u8 byte_EE896D` |
+| +02 | `u8 n16` | `u8 sub_67D010()` |
+| +03 | `u32 v30` | `u32 dword_EE8CB4` |
+| +07 | `u32 v16` | `u32 n0x64_0` |
+| +0B | `u8 v25[0]` | `u8 sub_720AA0(1,0)` |
+| +0C | `u16 v35` | quantized X-like component |
+| +0E | `u16 v36` | quantized Y-like component |
+| +10 | `u16 v37` | quantized Z-like component |
+| +12 | `u8 v23` | packed movement state |
+| +13 | `u8 v38` | directional/state value |
+| +14 | `u8 v14` | directional/state value |
+| +15 | `u8 v15` | `this+848` |
+| +16 | `u8 n0x1C` | derived movement/action state |
+| +17 | `u32 v29` | `sub_5AA5C0(n9)` |
+
+因此：
 
 ```text
-每約 500 ms
-→ Packet opcode 19
-→ sub_595A10()/related UDP path
+8/24 fixed actor schema
+    ↕ exact offset/width symmetry
+23 fixed actor schema
 ```
 
-其中 19 還帶有 retry/count-like state，最多進入 5 次的 escalation path；不能只稱為普通 heartbeat。[C][OPEN]
+confidence：**Strongly Supported → effectively bidirectional fixed-schema evidence**。
 
-## 13. Gameplay event relationship
+注意：23 的 nested segment 不一定存在；若 `this+1364 != 0`，會再呼叫 `sub_5E1D50()`。[C]
 
-UDP movement 與 TCP gameplay event 並非兩條完全獨立的語意世界。TCP opcode 166 會進：
+---
+
+## 13. Movement-adjacent nested event/effect segment
+
+### 13.1 `sub_5E2570()` parser
+
+fixed actor record 後，`sub_5E2570()` 先讀：
 
 ```text
-sub_58B010
-→ sub_58D820
-→ sub_749B90
+u8 nested_type
 ```
 
-`sub_749B90()` 再依 subtype 將事件送入多個 gameplay handlers：
+若為 0：
 
 ```text
-7       → sub_748E40
-8/9/18/25 → sub_748EB0
-12      → sub_749A30
-13      → stage/player reset cleanup
-17      → sub_748FF0
-24      → time / round-like handling
-1       → sub_746360
-2/16    → sub_7463E0
-3/20    → sub_747980
-4       → sub_748860
-5       → sub_748A50
-6       → sub_748CD0
-10      → sub_749230 / sub_749520
-11      → sub_7494B0 / sub_749810
-14      → sub_749AB0
-15      → sub_748420
-19      → sub_74D150
-21      → sub_747DD0
-22      → sub_747AB0
-23      → sub_74D410
-26      → sub_745F50
-27/29   → sub_746060
-30      → sub_74D510
-31/32   → sub_74D5D0
+no nested event segment
 ```
 
-因此 opcode 166 是 subtype-bearing gameplay event envelope，不是單一事件。[C]
-
-## 14. TCP opcode 165：Client→Server gameplay event envelope
-
-目前多個 sender 都直接建立 opcode 165，顯示它是 gameplay event family，而非單一 damage struct。
-
-### 14.1 `sub_55CAB0()` — OnSendPacketDamage
-
-Common shape：
+### Type 1
 
 ```text
-u8 source/player
-u8 subtype
-(optional special-mode: 3 × u16)
-u8 target/player
-(optional effect/category byte for selected subtypes)
-u16 weapon/resource identity
-u32 transformed value A
-u32 transformed value B
-u8 n4
-u8 a8
-u8 a9
-u32 target-related state dword_F6DD1C[target]
-u8 a10
-u32 a11
-u32 a12
-u32 a13
-(optional n4==4: resource/action byte + int, or 255)
+u8 type = 1
+u8 value
+u8 value
+6 × u16 spatial values
 ```
 
-實際 output 會把 `sub_5E72C0()` 產生的兩個 values 量化後用 `sub_592B20()` 寫出；因 `sub_592B20()` 是 4-byte writer，這裡不是 1-byte float field。[C]
-
-### 14.2 `sub_55D090()` — OnSendPacketMineBombDamage
-
-同為 opcode 165，但 subtype 由 caller 傳入，並含：
+Wire size：
 
 ```text
-source
-subtype
- target
- optional effect/category
-resource u16
-2 × transformed u32-like values
-several zero/state u32 fields
-dword_F6DD1C[target]
-additional bytes
+1 + 1 + 1 + 12 = 15 bytes
 ```
 
-因此 mine/bomb damage 是同一 opcode family 的另一 branch。[C]
-
-### 14.3 `sub_55D530()` — OnSendPacketMultiDamage
-
-明確寫入 subtype `16`，後面除 source/target/resource 外，還有多個額外 4-byte values，代表 multiple-hit/multi-damage aggregation；這也是 opcode 165 的另一個固定 subtype branch。[C]
-
-### 14.4 其它直接 sender
+### Type 2
 
 ```text
-sub_55C9F0() → opcode 165 subtype 24 / 22
-sub_55D440() → opcode 165 subtype 15
+u8 type = 2
+u16 value
+u8 value
+6 × u16 spatial values
 ```
 
-這再次證實 165 應抽象成：
+Wire size：
+
+```text
+1 + 2 + 1 + 12 = 16 bytes
+```
+
+### Type 3
+
+```text
+u8 type = 3
+u8 value
+6 × u16 spatial values
+```
+
+Wire size：
+
+```text
+1 + 1 + 12 = 14 bytes
+```
+
+### Type 4
+
+```text
+u8 type = 4
+u32 value
+u32 value
+6 × float values
+```
+
+Wire size：
+
+```text
+1 + 4 + 4 + 24 = 33 bytes
+```
+
+這四種 nested forms 都會建立 pooled runtime node：
+
+```text
+runtime node type 1 ← wire type 1/2/3
+runtime node type 2 ← wire type 4
+```
+
+Type 1/2/3 node：
+
+```text
+node +00 = 1
+node +01 = outer a4
+node +02 = caller a7
+node +04 = actor identity n16
+node +05 = subtype-1 value or -1
+node +06 = subtype-2 value or -1
+node +07 = outer a6
+node +08..+10 = one 3D vector
+node +11..+13 = second 3D vector
+```
+
+Type 4 node：
+
+```text
+node +00 = 2
+node +02 = caller a7
+node +04 = actor identity
+node +56 = (first u32 != 0)
+node +57 = (second u32 != 0)
+node +08..+10 = 3D float data
+```
+
+每個 node 最終經：
+
+```text
+sub_59E490(this + 5387, this + 5387, v17, &node)
+```
+
+進入持續存在的 linked-list / pooled queue，不是 parser local temporary。[C]
+
+### 13.2 `sub_5E1D50()` producer：現在可由兩端交叉驗證
+
+`sub_744450()` 在 `this+1364 != 0` 時：
+
+```text
+sub_5E1D50(this+1364, packet, n0x64)
+```
+
+`sub_5E1D50()` 從同一 runtime queue 選出 node，再重新序列化成 Type 1/2/3/4 nested segment。
+
+Producer branch：
+
+```text
+runtime node type 2
+    → wire type 4
+    → 1 byte type
+    → 2 × u32
+    → 6 × float
+
+runtime node type 1
+    + flags
+    → wire type 1 / 2 / 3
+    → subtype-specific leading byte/word fields
+    → 6 × quantized u16 coordinates
+```
+
+Quantization：
+
+```text
+float coordinate × 3.0 + 0.5
+→ u16 writer
+```
+
+Type 1 有一條額外幾何修正 branch：
+
+```text
+vector difference
+→ length
+→ normalize
+→ length + 10
+→ offset along normalized direction
+→ update node position
+→ serialize as type 2-like subtype branch
+```
+
+這表示 nested event data 不是單純顯示資料；producer 端會根據 runtime node state 重新計算幾何資料。[C]
+
+因此：
+
+```text
+sub_5E2570 (decode)
+        ↕
+sub_5E1D50 (encode)
+```
+
+已形成真正的 bidirectional schema evidence。exact public gameplay event names 仍 `[OPEN]`。
+
+---
+
+## 14. UDP timeout / health control
+
+`sub_5934B0()`：
+
+```text
+stored timestamp == 0
+    → healthy
+
+elapsed <= 30000 ms
+    → healthy
+
+elapsed > 30000 ms
+    → clear timestamp
+    → unhealthy
+```
+
+`sub_593510()` 在：
+
+```text
+n15 == 13
+AND timeout check fails
+```
+
+時建立：
+
+```text
+TCP opcode 697
+u16 payload = 1
+```
+
+Protocol registration：
+
+```text
+697 = GG_CHEATER_REPORT_REQ
+```
+
+因此 Client-side direct fact 是：
+
+```text
+30-second UDP/transport health timeout
+    → client emits GG_CHEATER_REPORT_REQ (697)
+```
+
+但 `n15 == 13` 的 full state meaning 與 Server receiver semantics 仍 `[OPEN]`；不能把 timeout 本身等同於 cheating。[C]
+
+---
+
+## 15. TCP gameplay event family: 165 / 166
+
+TCP opcode 165 有多個 Client-side sender，包含：
+
+```text
+sub_55CAB0  → damage/event branch
+sub_55D090  → mine/bomb damage branch
+sub_55D530  → multi-damage branch, subtype 16
+sub_55C9F0  → subtype 24 / 22
+sub_55D440  → subtype 15
+```
+
+所以 165 應建模成：
 
 ```text
 GameplayEvent165
     = source + subtype + subtype-specific payload
 ```
 
-而不是 `DamagePacket` 一個 class。[C]
+不是一個固定 `DamagePacket` class。[C]
 
-## 15. Damage / weapon state boundary
-
-`sub_5E1CD0()` 會在條件下選擇：
+目前 166 server→client 又進：
 
 ```text
-sub_5E06A0()
-或
-sub_5E0F10()
+sub_58D820
+    → sub_749B90
+    → subtype dispatch
 ```
 
-後者遍歷 target/hit candidates、取 `sub_67DFB0(actor)`，再經 weapon/action/resource lookup 計算 damage。它會從 4 個 weapon loadout slots 中比對 current action/resource identity，並進一步呼叫 `sub_603230()` 等 effect/hit generation path。[C]
-
-當 computed damage 達到 threshold 時：
+166 subtype map 包含：
 
 ```text
-sub_9BC3E0(target, ...)
-sub_9BC420(hit_effect_selector, transformed_hit_position)
-sub_5E63C0(...)   // death/state transition when applicable
+1       → sub_746360
+2/16    → sub_7463E0
+3/20    → sub_747980
+4       → sub_748860
+5       → sub_748A50
+6       → sub_748CD0
+7       → sub_748E40
+8/9/18/25 → sub_748EB0
+10      → sub_749230 / sub_749520
+11      → sub_7494B0 / sub_749810
+12      → sub_749A30
+14      → sub_749AB0
+15      → sub_748420
+17      → sub_748FF0
+19      → sub_74D150
+21      → sub_747DD0
+22      → sub_747AB0
+23      → sub_74D410
+24      → time/round handling
+26      → sub_745F50
+27/29   → sub_746060
+30      → sub_74D510
+31/32   → sub_74D5D0
 ```
 
-之後 local client 再經 `sub_55CAB0()` 等 sender 將 gameplay event 發出去。[C]
+因此 165/166 是 polymorphic gameplay event envelope；完整 subtype schema 仍在 `Gameplay_Combat.md` 維護。[C]
 
-因此目前可安全建模成：
+---
+
+## 16. Opcode 714 / 715
+
+Protocol registration：
 
 ```text
-input / local simulation
-    → hit / weapon calculation
-    → local visual/state application
-    → gameplay event packet
-    → server-side validation / authoritative resolution
+714 = GG_INVALIDWPDATA_REQ
+715 = GG_INVALIDWPDATA_ACK
 ```
 
-最後一段的 authoritative server boundary 在目前 client-only evidence 中仍不是「所有情況 100% 證明」，所以 server model 應標為高可信 architectural inference，而非偽裝成直接 C proof。[C][OPEN]
-
-## 16. UDP / TCP / state 三層不能混為一談
-
-目前模型：
+`sub_548E80()`：
 
 ```text
-Transport
-├─ TCP stream
-└─ UDP datagram/thread
-
-Protocol envelope
-├─ Packet frame
-├─ opcode/type
-└─ subtype / variable payload
-
-Gameplay state
-├─ PlayerState
-├─ Character/Equipment
-├─ Weapon/Action
-├─ Hit/Damage
-├─ Room/Mode
-└─ Result/Quest
+if already reported → stop
+if identity is accepted/common → stop
+otherwise increment anomaly counter
+counter <= 40 → stop
+counter > 40 → construct/send 714
 ```
 
-尤其：
+714 fixed payload width：
 
 ```text
-actor identity != slot index
-weapon identity != action identity
-packet opcode != packet subtype
-runtime object offset != wire field offset
+u8  local/player identity
+u8  local context/state byte
+u8  actor-local value
+ANSI null-terminated string
+u32 Resource/Action Identity candidate
 ```
 
-這些 distinction 是重寫 Server 時避免系統性錯位的核心。
+其中前三欄直接經 `sub_592920()`，因此必為 1 byte；最後欄經 `sub_592A20()`，因此為 4 bytes。[C]
 
-## 17. Server reconstruction boundary
-
-Network layer：
+714 的安全語意：
 
 ```text
-TCP
-├─ Stream reader / frame reassembly
-├─ integrity / XOR / checksum
-├─ transform/validation
-├─ OpcodeRouter
-└─ packet codec
-
-UDP
-├─ datagram receive
-├─ Packet validation / transform
-├─ OpcodeRouter
-├─ MovementQueue
-└─ actor-record codec
+Client → Server invalid/unrecognized weapon-data/resource-identity report
 ```
 
-Gameplay semantic 再交給：
+715 handler：
 
 ```text
-Room_GameRule_Mode.md
-Gameplay_Combat.md
-Result_Quest_Stats.md
-Character_Inventory_Equipment.md
-Login_ClientData_Protocol.md
-Resource_Pack_Model.md
+sub_55D990
+    → sub_555030(&dword_1321D00)
+    → shutdown(socket, 2)
+    → closesocket(socket)
+    → message/UI path id 0x320
 ```
 
-## 18. 目前仍真正 OPEN 的問題
+715 handler 本身沒有 Packet reader，因此 client-side 目前沒有證據支持它存在 body fields。[C]
+
+Interaction model：
 
 ```text
-TCP header +0x06 的正式語意
-TCP transform/compression exact formula 與 enable conditions
-完整 TCP send queue / retry semantics
-
-UDP movement 26-byte record 的：
-  R+00 v28 exact meaning
-  R+01 v19 exact meaning
-  R+02 n16 exact identity namespace
-  R+03 v30 exact meaning
-  R+07 v16 exact meaning
-  R+11 v25[0] formal state enum
-  R+12/R+14/R+16 exact axis/unit encoding
-  R+18 v23 exact meaning
-  R+19 v38 exact meaning
-  R+20 v14 exact meaning
-  R+21 v15[0] exact meaning
-  R+22 n0x1C exact meaning
-  R+23 v29 exact namespace/semantics
-
-UDP 8/24 sender/producer call-site
-UDP datagram-level external wrapper beyond Packet layer
-UDP opcode 17/19 exact gameplay/network-health semantics
-UDP timeout 697 counterpart / server role
-
-TCP 165/166 all subtype payloads and exact server validation contracts
-TCP 714 exact counterpart / purpose
-Exact itemdata category-specific weapon/action fields
-Exact maplist tail field names
-Exact public weapon-part slot ↔ PARTS06/07 mapping
-Full raw itemdata.pat byte-level schema
+repeated invalid/resource identity path
+    → 714
+    → Server [implementation unavailable]
+    → 715
+    → Client TCP disconnect
 ```
 
-## 19. 最高價值後續追查順序
+confidence：**Strongly Supported** for the complete Client-side interaction；Server-side implementation仍 `[OPEN]`。
+
+---
+
+## 17. Client / Server responsibility boundary
+
+目前 evidence-compatible architecture：
 
 ```text
-A. sub_591600 / sub_591900 / sub_593110 / sub_4042A0
-   → close TCP/Packet transform
+Client
+├─ local simulation / visual state
+├─ input / movement sampling
+├─ local resource/action lookup
+├─ packet encode / decode
+├─ checksum / XOR / transform
+├─ UDP peer endpoint maintenance
+└─ report / gameplay event submission
 
-B. exact UDP 8/24 sender producer
-   → reverse-construct the 26-byte record
-
-C. all consumers of v28/v19/v30/v16/v23/v38/v14/n0x1C/v29
-   → formalize movement fields
-
-D. n16 → sub_67D7D0 → exact actor identity namespace
-
-E. v29 → action/resource identity table
-
-F. 165/166 subtype pairs
-   → build complete gameplay event schema
-
-G. 714 receive counterpart
-   → close client/server report boundary
-
-H. itemdata.pat category-specific fields
-   → close weapon/character/effect definitions
+Server
+├─ authoritative session / room / player state
+├─ packet validation
+├─ weapon/action/resource validation
+├─ gameplay authoritative resolution
+├─ result / quest / reward state
+└─ persistence / economy
 ```
+
+Client-only evidence 可以直接證明 Client-side responsibilities；Server authoritative behavior 若沒有 Server binary/PDB，不得寫成「Client C 已證實」。
+
+---
+
+## 18. Server reconstruction rules derived from this file
+
+### TCP
+
+```text
+async stream reader
+→ persistent receive buffer
+→ header parse
+→ frame-size validation
+→ inverse transform
+→ dispatcher
+→ typed packet parser
+```
+
+必須處理：
+
+```text
+fragmentation
+coalescing
+partial send
+WSAEWOULDBLOCK retry
+```
+
+### UDP
+
+```text
+datagram receive
+→ outer Packet validation
+→ inverse transform
+→ UDP opcode dispatch
+→ movement queue / peer handler
+```
+
+### Movement
+
+```text
+u8 actor_count
+→ N × 27-byte fixed actor record
+→ optional variable nested event segment
+```
+
+Server serializer 若需要與 Client 23→8/24 family 相容，fixed record 必須維持：
+
+```text
+27-byte exact offsets
+```
+
+不能從舊版 26-byte research 或 local array size 生成 schema。
+
+### Packet transform
+
+當 Client-compatible encryption required：
+
+```text
+16-byte block cipher
+AES/Rijndael-128-class
+10 rounds
+Packet transform flag 0x04/0x08
+```
+
+但 exact custom mode / IV / interaction with compression and `P+0x06` length lifecycle 仍 `[OPEN]`；不要自行替換成標準 AES-CBC/CTR 實作，直到最後一層 evidence 關閉。
+
+---
+
+## 19. 目前主要 unresolved
+
+```text
+1. Packet P+0x04 IntegrityWord 的完整 sender/receiver lifecycle
+2. Packet P+0x06 TransformPreviousLength 在每個 transform branch 的精確語意
+3. AES mode=2 的 exact IV/mode semantics
+4. AES key initialization 的完整 runtime initialization path
+5. compression + AES combined frame 的 exact length evolution
+6. UDP 8/24 server-side producer
+7. UDP 23 formal protocol symbol/name
+8. Movement R+00/R+01/R+03/R+07/R+12/R+13/R+14/R+15 exact semantics
+9. Movement R+02 exact identity namespace
+10. Movement R+16 generic state selector完整 enum
+11. Movement R+17 exact Resource/Action namespace
+12. nested event type 1/2/3/4 exact public gameplay event mapping
+13. UDP 155/156 hole-information producer/consumer
+14. UDP 17/19 exact periodic semantics
+15. UDP 697 server counterpart
+16. TCP 165/166 complete subtype wire schema
+17. TCP 714 server receiver / 715 policy implementation
+```
+
+---
 
 ## 20. Evidence discipline
 
 ```text
-[C]     IDA C direct evidence
-[RES]   Extracted resource evidence
-[WIKI]  Wiki / player-observable historical behavior
-[X]     at least two independent evidence classes agree
-[OPEN]  unresolved; do not silently replace with 0 or invented enum
+[C]     PaperMan.exe.c direct code evidence
+[EXE]   original PaperMan.exe machine-code / raw-binary evidence
+[RES]   Extracted game-resource evidence
+[WIKI]  historical Wiki / player-observable evidence
+[X]     independent evidence classes agree
+[OPEN]  unresolved
 ```
 
-Parser/serializer implementation has priority over Hex-Rays guessed local types. Resource definitions, runtime state, and network wire layouts must remain distinct until a conversion path is directly established.
+Rules：
+
+```text
+Parser/serializer > Hex-Rays guessed prototype
+Raw EXE/ASM > surface decompiler type
+Same numeric value ≠ same semantic
+Runtime offset ≠ wire offset
+Opcode ≠ subtype
+Resource ID ≠ packet semantic without data-flow evidence
+Client behavior ≠ Server implementation
+```
+
+未知欄位永遠保留 `[OPEN]`，除非直接證據、反向資料流、Resource 或可靠歷史資料足以解鎖。
+
+---
+
+## 21. Cross-reference
+
+```text
+Network_Dispatcher_Inventory.md
+Login_ClientData_Protocol.md
+Room_Channel_GameRule_101_221_Field_Evidence.md
+Character_Inventory_Equipment.md
+Room_GameRule_Mode.md
+Gameplay_Combat.md
+Result_Quest_Stats.md
+Resource_Pack_Model.md
+Server_State_Model.md
+KickVote/Research.md
+```
+
+本文件保存 Network／Packet／Movement 的 canonical wire truth；domain 文件保存 semantic truth；不要讓兩份文件各自維護不同版本的同一 Packet schema。
