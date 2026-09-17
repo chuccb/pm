@@ -67,13 +67,13 @@ Extracted/
 | Character / Appearance / Inventory / Weapon 是什麼？ | [`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md) | 共用 wire record → [`ClientData_Shared_Decoder_Field_Evidence.md`](ClientData_Shared_Decoder_Field_Evidence.md) |
 | `198/200/203/218/220/221` 的 ClientData wire layout？ | [`ClientData_Shared_Decoder_Field_Evidence.md`](ClientData_Shared_Decoder_Field_Evidence.md) | `198` 組合順序 → [`MyInfo_198_ClientData_Field_Schema.md`](MyInfo_198_ClientData_Field_Schema.md) |
 | PG / CASH / CP？ | [`Currency_State_Field_Evidence.md`](Currency_State_Field_Evidence.md) | 相關 packet 回到各 packet schema |
-| Channel / Lobby / Room / Player / Team / Map / GameRule 生命週期？ | [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md) | 精確 packet → `101–192` / `193–221` Field Evidence |
+| Channel / Lobby / Room / Player / Team / Map / GameRule 生命週期？ | [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md) | 精確 packet → [`Room_Channel_GameRule_101_221_Field_Evidence.md`](Room_Channel_GameRule_101_221_Field_Evidence.md) |
 | Room selector / map / rule / setting packet？ | [`Room_Settings_Packets.md`](Room_Settings_Packets.md) | 高階生命週期回 [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md) |
 | 各模式規則與 selector value？ | [`Mode_Rules_And_Options.md`](Mode_Rules_And_Options.md) | Runtime 狀態回 [`Server_State_Model.md`](Server_State_Model.md) |
 | Result / K-D / Score / Quest / Event？ | [`Result_Quest_Stats.md`](Result_Quest_Stats.md) | `269 subtype 7` → [`TCP_269_Subtype7_Field_Detail.md`](TCP_269_Subtype7_Field_Detail.md) |
 | 跨整個 Server 要怎麼建模？ | [`Server_State_Model.md`](Server_State_Model.md) | 再回各領域主文件取得 packet truth |
 | Resource pack / loader / runtime boundary？ | [`Resource_Pack_Model.md`](Resource_Pack_Model.md) | 再回使用該 Resource 的功能主文件 |
-| 武器丟棄／拾取？ | [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md) | 需要 gameplay/context 時回 [`Gameplay_Network.md`](Gameplay_Network.md) |
+| 武器丟棄／拾取？ | [`Gameplay_Network.md`](Gameplay_Network.md) | Gameplay 內的 `960–963` 章節 |
 
 ## 文件責任邊界
 
@@ -132,18 +132,16 @@ Login
 ## Channel／Lobby／Room／Player／Map／GameRule
 
 - [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md)：高階 lifecycle、Player Slot、Team/Group、Map、Room 與 GameRule。
-- [`Room_Channel_GameRule_101_192_Field_Evidence.md`](Room_Channel_GameRule_101_192_Field_Evidence.md)：`101–192` 精確 packet／parser／serializer／field evidence。
-- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` 精確 packet／parser／serializer／field evidence。
+- [`Room_Channel_GameRule_101_221_Field_Evidence.md`](Room_Channel_GameRule_101_221_Field_Evidence.md)：`101–221` 精確 packet／parser／serializer／field evidence。
 - [`Room_Settings_Packets.md`](Room_Settings_Packets.md)：Room selector/value、設定封包與 UI data-flow。
 - [`Server_State_Model.md`](Server_State_Model.md)：跨子系統 Server abstraction；不取代上述 packet truth。
 
 ## 模式／Gameplay／Combat／Movement
 
 - [`Mode_Rules_And_Options.md`](Mode_Rules_And_Options.md)：ModeId、OptionIndex、OptionValue、規則與版本差異。
-- [`Gameplay_Network.md`](Gameplay_Network.md)：`165/166 Y_TCP_INF` gameplay event family、166 subtype、Resource/state application。
+- [`Gameplay_Network.md`](Gameplay_Network.md)：`165/166 Y_TCP_INF` gameplay event family、166 subtype、Resource/state application；另含 `960–963` 武器丟棄／拾取 protocol。
 - [`Combat_Damage.md`](Combat_Damage.md)：Hit Detection、Combat geometry、Damage modifier 與 `165` 建包前計算。
 - [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md)：UDP `8/24`、Queue、27-byte actor record 與 movement/state 欄位。
-- [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：武器丟棄／拾取事件。
 
 ## Result／Quest／Resource
 
