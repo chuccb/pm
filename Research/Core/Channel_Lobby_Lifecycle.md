@@ -1,21 +1,41 @@
-# Channel → Lobby → Room 生命週期與 2016 Final Client 封包研究
+# Channel → Lobby → Room 生命週期與 2016 Final Client
 
-> 研究日期：2026-09-16
-> Target：日本版 PaperMan 2016 年最終 Client
->
-> 本文件專門收斂 Login 成功後的 Channel / Lobby / Room 邊界。所有尚未由 Client serializer/parser 或 caller/data-flow 封死的欄位，保持 OPEN，不以 packet 名稱猜語意。
+> 研究日期：2026-09-17
+> Target：日本版 PaperMan 2016 年服務終了時的最終 Client。
+> 文件角色：只保存 Channel → Lobby → Room 的生命週期、物件邊界與跨封包狀態轉移；精確 wire 欄位統一回 `Channel_Lobby_193_221_Field_Evidence.md`、`GameRule_Lifecycle.md` 與其他對應主文件。
 
-## 1. 版本前提：2016 final 不應套用早期 Channel 架構
+## 1. 版本基線
 
-PaperMan Wiki 的歷史資料記載：2014-06-25 進行「チャンネル（待機ロビーとゲームルーム）の紐付けの解消（サーバーチャンネル統合）」。因此 2016 final 的研究模型應以統合後架構為基線，而不能直接假設早期「待機 Lobby 與 Game Room 分屬不同 server/channel」的舊拓撲。
+PaperMan Wiki 的歷史資料記載 2014-06-25 已進行「チャンネル（待機ロビーとゲームルーム）の紐付けの解消（サーバーチャンネル統合）」。因此 2016 Final 不應直接套用更早期的 Server Channel 拓撲。
 
-這不表示 Lobby / Room 在 Client object layer 中不存在；Client 仍有明確的 Lobby、GameRoom、TournamentGameRoom 類別與 UI state。它只表示兩者與 Server Channel 的關係必須依 final Client packet flow 重建。
+這不代表 Client object layer 中不存在 Lobby / Room；C 中仍可直接看到：
 
-[W] Wiki：GamePot 宿題頁記載 2014-06-25 的伺服器 Channel 統合。
+```text
+CLobbyLogin
+CLobbyGameRoom
+CLobbyTournamentGameRoom
+CGameRule
+```
 
-## 2. 目前已閉合的登入 → Channel 鏈
+所以目前採用的工作模型是：
 
-目前 Client 研究已確認：
+```text
+Login
+  ↓
+Server / Channel state
+  ↓
+Lobby state
+  ↓
+GameRoom / TournamentGameRoom
+  ↓
+CGameRule
+```
+
+這是 Client object/state layering，不等於 Server process 或 TCP connection layering。
+
+## 2. Login → Channel 的生命週期
+
+目前已閉合的高階流程：
 
 ```text
 Login UI
@@ -26,320 +46,198 @@ credential validation
   ↓
 681 GL_LOGIN_ACK
   ↓
-bootstrap / server-channel data hydration
+server/channel bootstrap data
   ↓
 Channel / Lobby layer
 ```
 
-### 2.1 `GL_LOGIN_REQ (682)`
-
-Client sender `CLobbyLogin::sub_43DF00()` 會在 credential validation 成功後建立 682。
-
-已從 serializer data-flow 確認它不是單純：
+`681/682` 的完整欄位 schema 不在本文件重複；請使用：
 
 ```text
-username + password
+Login_Adjacent_680_696_Field_Schema.md
 ```
 
-而至少包含：
+該文件負責 680–696 的欄位與 parser 證據。
+
+## 3. Channel / Lobby 封包邊界
+
+本生命週期只記錄它們在狀態機中的位置；精確欄位、讀寫寬度與 parser 必須回到：
 
 ```text
-string field A
-string field B
-8-byte-ish value derived through sub_592AE0
-byte-like field
-fixed 0x18-byte binary field
-another string field
+Channel_Lobby_193_221_Field_Evidence.md
 ```
 
-其中 datarevision-derived value 使用 Client 讀入的 `datarevision.txt` 相關 state。
-
-因此 server implementation 不應先假設 682 只有帳密；完整 wire schema 仍需逐 writer 封死。
-
-### 2.2 `GL_LOGIN_ACK (681)`
-
-`CLobbyLogin::sub_43E500()` 先讀取 status byte。
-
-在 `status == 1` 時進入大型 bootstrap parser，會連續讀取 scalar、string、array 與多組 record，並建立後續 server/channel/bootstrap 狀態。
-
-目前已確認這是「登入後資料初始化入口」，而不是單純 login success flag。
-
-精確 record schema 尚 OPEN；下一步應把每一次 `sub_592900/sub_592940/...` read 與最終 object/UI field 一一配對。
-
-## 3. Channel 相關封包目前確認狀態
-
-### `GC_CHANNEL_REQ (193)` / `GC_CHANNEL_ACK (194)`
-
-這一對的 packet registration 已確認存在，但目前尚未完成 top-level sender/parser 的完整 wire body closure。
-
-特別注意：193 這個數字也出現在另一個 nested serializer context 中；該 occurrence 不能直接當作 top-level `GC_CHANNEL_REQ` body 的證據。
-
-因此目前資料模型只保留：
+目前生命週期上可定位：
 
 ```text
-193 GC_CHANNEL_REQ
-body: OPEN
-
-194 GC_CHANNEL_ACK
-body: OPEN
+193/194  Channel list / channel-state family
+195/196  Channel entry request / response
+197/198  MyInfo bootstrap request / response
+199/200  Item/client-data bootstrap family
+201–221  ClientData / item / collection synchronization family
+370      Channel change request
 ```
 
-### `GC_ENTERCHANNEL_REQ (195)`
+注意：上述「family」是生命週期定位，不代表每個 opcode 的公開 business name 都已完全閉合。
 
-已找到明確 sender `sub_56FF40(a1,a2,...)`。
-
-wire body 已直接閉合為 3 bytes：
+已直接封死的重點例如：
 
 ```text
-195 GC_ENTERCHANNEL_REQ
-+0x00 u8 field0
-+0x01 u8 field1
-+0x02 u8 boolean-like field
+195 → 3-byte request
+197 → 0-byte request
+370 → 1-byte request
 ```
 
-第三 byte 的產生路徑經 `sub_7338D0` / `sub_735DE0`，具有明顯 boolean-like 行為。
+其精確欄位名稱仍遵循對應 Field Evidence 主文件。
 
-目前不能將前兩 byte 直接命名成 `channel_id` / `server_id`，因為 caller-level provenance 尚未全部封死。
+## 4. Lobby → Room
 
-### `GC_ENTERCHANNEL_ACK (196)`
-
-registration 已確認，但目前仍需要：
+Wiki 的玩家可見操作流程與 Client object model 形成高階交叉驗證：
 
 ```text
-196 receiver
+進入 Channel
   ↓
-state transition
+Lobby
   ↓
-actual lobby/channel object update
+Room list
+  ↓
+進入／建立 Room
+  ↓
+Room Master / player slots
+  ↓
+Ready
+  ↓
+Start
 ```
 
-完整追查。
+這裡不要把 Wiki 的 UI 名稱直接當成 C 裡未知 byte 的正式 protocol enum；Wiki 用於 behavior-level semantic anchor，C/LST/Resource 才負責 wire closure。
 
-### `GL_MYINFO_REQ (197)`
+## 5. Ready → Start
 
-`sub_5704B0()` 明確建立並送出 197，沒有 payload：
-
-```text
-197 GL_MYINFO_REQ
-payload = 0 bytes
-```
-
-其 response 尚未完全閉合；必須繼續從 receiver dispatch 及 player-info object 寫入追查，而不能只以 `MYINFO` 名稱推測 response。
-
-### `GL_CHANGECHANNEL_REQ (370)`
-
-`sub_570030(a1)` 在 current channel 與 target channel 不相同時建立 370，body 為單一 byte：
+GameRule 層的核心生命週期是：
 
 ```text
-370 GL_CHANGECHANNEL_REQ
-+0x00 u8 channel_value
-```
-
-因此 channel switch 至少存在一條直接的 one-byte request path。
-
-目前 `channel_value` 不命名為 generic `server_id`；需要繼續與 681 bootstrap 的 channel/server records 及 196 response 對齊。
-
-## 4. Client object layer 的 Lobby / Room 分界
-
-目前 Client C 中至少存在：
-
-```text
-CLobbyLogin
-CLobbyGameRoom
-CLobbyTournamentGameRoom
-```
-
-以及 GameRule layer。
-
-因此應採用：
-
-```text
-Server Channel state
-        ↓
-Lobby state
-        ↓
-GameRoom / TournamentGameRoom state
-        ↓
-CGameRule state
-```
-
-作為目前 reconstruction 的工作模型。
-
-但是這是 Client object layering，不等於 server process / TCP connection layering；後者必須由 packet transport 與 socket lifecycle 另外證明。
-
-## 5. Wiki 與 Client 對 Lobby / Room 的交叉驗證
-
-Wiki 的操作教學記載：進入 channel/server 後會看到 lobby；Lobby 中可以查看對戰 room list，選擇 room 後進入待機 room；待機 room 顯示 room master、ready 與 start 等狀態。
-
-Wiki 另記載一般模式需要玩家準備完成後由 Room Master 開始，而練習模式存在較特殊的最少人數條件。
-
-這些玩家可見規則與 Client 已找到的：
-
-```text
+Room
+  ↓
 127 GR_READY_REQ
+  ↓
+玩家 Ready state
+  ↓
 129 GR_START_REQ
-130 GR_START_ACK
-135 GR_CHANGESLOT_REQ
+  ↓
+130 GR_START_ACK / player & game synchronization
+  ↓
+CGameRule::NewGameStart
 ```
 
-在概念層一致，但不能反過來用 Wiki 規則直接替 C 中未知 byte 命名。
-
-## 6. 目前最可信的 Channel / Lobby / Room 模型
+完整 `127/128/129/130` wire 與 parser 證據統一放在：
 
 ```text
-GL_LOGIN_REQ 682
+GameRule_Lifecycle.md
+```
+
+本文件不再複製它們的欄位表，避免日後兩份結論漂移。
+
+## 6. Leave / End
+
+生命週期上必須區分：
+
+```text
+GR_LEAVE_REQ  123
+GR_LEAVE_ACK  124
+
+GR_END_REQ    133
+GR_END_ACK    134
+```
+
+目前 C 已證明 123 與 133 都存在無 payload request path，但兩者由不同上層狀態／模式分支觸發，因此 Server state machine 不應只建立一個泛化 `Leave()` 操作。
+
+完整 receiver state transition 請回 `GameRule_Lifecycle.md`。
+
+## 7. 與 Room / GameRule 的責任邊界
+
+```text
+Channel_Lobby_Lifecycle.md
+    = Channel → Lobby → Room 的高階物件／狀態生命週期
+
+Channel_Lobby_193_221_Field_Evidence.md
+    = 193–221 精確 packet/parser/serializer evidence
+
+GameRule_Lifecycle.md
+    = Ready / Start / End / Leave / Slot / Master / GameRule state machine
+
+Room_Settings_Packets.md
+    = Room UI selector/value → request/ack → state 的專題證據
+
+Server_State_Model.md
+    = Server-side state object / ownership / synchronization model
+```
+
+這個責任切分是刻意保留的；只有真正不同的研究問題才維持獨立文件。
+
+## 8. Cross-source constraints
+
+```text
+Wiki
+  → 玩家可見操作、模式規則、歷史版本背景
+
+Extracted
+  → ClientData / Resource identity、UI、Map、Avatar 等具體資料
+
+IDA C / LST
+  → serializer、parser、caller/callee、state mutation、wire width
+```
+
+任何未知欄位都必須先沿 `C/LST → Resource → Wiki` 逐層閉合；未閉合前保持 `field_N`、`value_N` 或 `OPEN`。
+
+## 9. 目前生命週期模型
+
+```text
+682 Login Req
       ↓
-GL_LOGIN_ACK 681
-      ↓
-bootstrap server/channel records
+681 Login Ack / bootstrap
       ↓
 Channel selection / entry
-      ├── GC_CHANNEL_REQ 193   [body OPEN]
-      ├── GC_CHANNEL_ACK 194   [body OPEN]
-      ├── GC_ENTERCHANNEL_REQ 195
-      │      + 3 bytes
-      ├── GC_ENTERCHANNEL_ACK 196 [state OPEN]
-      ├── GL_MYINFO_REQ 197
-      │      + 0 bytes
-      └── GL_CHANGECHANNEL_REQ 370
-             + 1 byte
+      ↓
+193/194 channel state
+      ↓
+195/196 channel entry
       ↓
 Lobby
       ↓
 GameRoom / TournamentGameRoom
       ↓
-Room settings / player slots
+Room settings / slots / team
       ↓
 127 Ready
       ↓
 129 Start
       ↓
-130 Start sync
+130 synchronization
       ↓
 CGameRule::NewGameStart
+      ↓
+Gameplay
+      ↓
+123 Leave  or  133 End
+      ↓
+124 / 134
+      ↓
+Lobby / Channel return
 ```
 
-## 7. 尚未允許命名的欄位
+這是目前 evidence-supported 的高階模型，不把尚未閉合的 Server topology 或未知欄位當成定論。
 
-目前特別保留：
+## 10. 下一個閉合優先級
 
 ```text
-195 +0x00 = field0 / OPEN
-195 +0x01 = field1 / OPEN
-195 +0x02 = boolean-like / semantic OPEN
-370 +0x00 = channel_value / semantic OPEN
-193 body = OPEN
-194 body = OPEN
-196 state transition = OPEN
-681 bootstrap records = OPEN
+P0  196 receiver → Lobby/Channel object update
+P0  681 bootstrap → server/channel records
+P0  198 → 200 → ClientData / item hydration
+P1  Room list → Room entry → CLobbyGameRoom
+P1  Room / TournamentRoom slot synchronization
+P1  137/138 start-time state
+P2  Channel change 370 → 681/196/channel state cross-link
 ```
 
-不能因為：
-
-```text
-packet 名稱
-UI label
-常見 server protocol 慣例
-```
-
-就直接改成：
-
-```text
-server_id
-channel_id
-channel_type
-region
-user_count
-```
-
-除非後續取得 caller provenance、parser destination 或 Resource 對照。
-
-## 8. 下一步優先級
-
-### P0：196 `GC_ENTERCHANNEL_ACK`
-
-要找出：
-
-```text
-receiver
-→ status / fields
-→ lobby object
-→ channel object
-→ player list / room list refresh
-```
-
-這會直接封閉 195 的兩個未知 byte。
-
-### P0：197 `GL_MYINFO_REQ`
-
-追：
-
-```text
-197 sender
-→ receiver
-→ player profile object writes
-→ character / level / currency / equipment bootstrap
-```
-
-這是 Login → Character / Inventory / Equipment 的天然入口。
-
-### P0：681 bootstrap
-
-將大型 parser 分段標記為：
-
-```text
-record start offset
-field width
-field destination
-loop count provenance
-resource/string cross-reference
-```
-
-目標是把「登入成功後 server 回傳資料」變成可實作的 schema，而不是只知道它很大。
-
-### P1：193/194
-
-找到 top-level sender / receiver；確認是否是：
-
-```text
-channel list request
-channel list response
-```
-
-或其他 GC-level operation。未封死前保持 OPEN。
-
-### P1：Room entry
-
-沿：
-
-```text
-Lobby room list
-→ room create / join operation
-→ CLobbyGameRoom construction
-→ player slot population
-→ room setting sync
-```
-
-繼續接到既有 `GameRule_Lifecycle.md`。
-
-## 9. 證據等級
-
-- 193/194：目前為 Client registration-level evidence，wire body OPEN。
-- 195：Client serializer direct evidence；3-byte body 已閉合。
-- 196：registration-level + receiver path 待完整 closure。
-- 197：Client serializer direct evidence；0-byte body 已閉合。
-- 370：Client serializer direct evidence；1-byte body 已閉合。
-- 681/682：Client direct evidence；大型 schema 仍待逐欄位 closure。
-- Wiki Channel/Lobby historical architecture：Wiki evidence；用於版本背景，不直接取代 Client protocol evidence。
-
-## 10. Reconstruction 原則
-
-此文件只記錄目前證據能支持的程度。
-
-在 server reconstruction 中，未知欄位應保持：
-
-```text
-unknown / optional / default candidate
-```
-
-只有在 Client C + LST/ASM + Resource + caller/callee data-flow 都無法再提供證據時，才考慮以 0 或 hardcoded fallback 實作，並明確標示為 fallback，而不是 protocol fact。
+所有新增證據應更新對應主文件，不在本文件再次建立一份 packet schema。
