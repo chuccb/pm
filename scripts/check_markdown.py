@@ -12,25 +12,22 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[1]
 CONVERTER = OpenCC("s2twp")
-
-# Markdown 語法中不應參與語言檢查的區域。
-FENCED_BLOCK_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 URL_RE = re.compile(r"https?://[^\s)]+")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def visible_text(line: str, in_fence: bool) -> tuple[str, bool]:
-    stripped = line.lstrip()
-    if stripped.startswith("```") or stripped.startswith("~~~"):
-        return "", not in_fence
-    if in_fence:
-        return "", True
-
+def strip_non_prose(line: str) -> str:
+    """移除不需要做自然語言檢查的 Markdown／技術內容。"""
     text = INLINE_CODE_RE.sub("", line)
     text = URL_RE.sub("", text)
     text = HTML_TAG_RE.sub("", text)
-    return text, False
+    return text
+
+
+def is_fence(line: str) -> bool:
+    stripped = line.lstrip()
+    return stripped.startswith("```") or stripped.startswith("~~~")
 
 
 def check_file(path: Path) -> list[str]:
@@ -40,17 +37,18 @@ def check_file(path: Path) -> list[str]:
     except UnicodeDecodeError:
         return [f"{path}: 不是 UTF-8 編碼"]
 
-    lines = content.splitlines()
     h1_count = 0
     previous_level = 0
     in_fence = False
 
-    for number, line in enumerate(lines, start=1):
-        text, fence_changed = visible_text(line, in_fence)
-        if fence_changed:
+    for number, raw_line in enumerate(content.splitlines(), start=1):
+        if is_fence(raw_line):
             in_fence = not in_fence
             continue
+        if in_fence:
+            continue
 
+        text = strip_non_prose(raw_line)
         if not text.strip():
             continue
 
