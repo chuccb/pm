@@ -6,6 +6,24 @@
 
 本目錄保存 PaperMan 日版最終 Client 的逆向研究、遊戲機制、封包協定、資源分析與三方交叉驗證結果。
 
+## 最短閱讀路徑
+
+```text
+第一次進入研究
+    ↓
+Research/README.md
+    ↓
+DOCUMENT_INDEX.md
+    ↓
+用「我要查什麼」找到第一入口
+    ↓
+主文件
+    ↓
+必要時才深入 Field Evidence / Schema / Detail
+```
+
+不要為了找一個 Packet 或 State 同時打開所有 Markdown。`DOCUMENT_INDEX.md` 的「最快定位」表就是為了先縮小上下文。
+
 ## 先讀這三份
 
 ```text
@@ -16,7 +34,7 @@ Research/README.md
 Research/DOCUMENT_INDEX.md
 ```
 
-`AGENTS.md` 是維護規則；本文件是研究總覽；`DOCUMENT_INDEX.md` 是全部研究 Markdown 的唯一索引。
+`AGENTS.md` 是維護規則；本文件是研究總覽；`DOCUMENT_INDEX.md` 是全部研究 Markdown 的唯一索引與問題定位入口。
 
 ## 研究材料
 
@@ -108,7 +126,26 @@ vtable slot
 
 ## 研究文件如何分工
 
-`Research/DOCUMENT_INDEX.md` 已按主題與文件角色整理全部現有文件。大方向如下：
+`Research/DOCUMENT_INDEX.md` 是文件間的真正導航；`Research/Core/README.md` 則提供 Core 內部更細的問題定位。
+
+```text
+Research/DOCUMENT_INDEX.md
+    = 「我該去哪份文件？」
+
+Core/README.md
+    = 「這個主題各文件怎麼分工？」
+
+各主文件
+    = 「目前已知什麼？」
+
+Field Evidence / Schema / Detail
+    = 「具體欄位、函式、讀寫與證據是什麼？」
+
+C / LST / Extracted / Wiki
+    = 「這個結論為什麼成立？」
+```
+
+大方向如下：
 
 ```text
 網路與 Dispatcher
@@ -142,14 +179,15 @@ Result / Quest / Resource
 ```text
 1. 先閱讀 AGENTS.md
 2. 閱讀本文件與 DOCUMENT_INDEX.md
-3. 搜尋既有文件與相同 Opcode／函式／資源
-4. 找到主文件後直接擴充，不建立平行副本
-5. 從 C / LST 追 serializer、parser、caller、callee 與 state field
-6. 對照 Extracted 資源
-7. 對照 Wiki 與版本資料
-8. 區分已確認、交叉推導與 OPEN
-9. 更新主文件、主題 README、DOCUMENT_INDEX
-10. 執行 python scripts/check_markdown.py
+3. 用索引的「最快定位」找到第一入口
+4. 搜尋既有文件與相同 Opcode／函式／資源
+5. 找到主文件後直接擴充，不建立平行副本
+6. 從 C / LST 追 serializer、parser、caller、callee 與 state field
+7. 對照 Extracted 資源
+8. 對照 Wiki 與版本資料
+9. 區分已確認、交叉推導與 OPEN
+10. 更新主文件、主題 README、DOCUMENT_INDEX
+11. 執行 python scripts/check_markdown.py
 ```
 
 ## 未確認事項
@@ -164,6 +202,6 @@ Result / Quest / Resource
 
 ## 維護邊界
 
-本文件不重複保存各專題的完整內容；詳細研究請從 [`DOCUMENT_INDEX.md`](DOCUMENT_INDEX.md) 進入。
+本文件不重複保存各專題的完整內容；詳細研究請從 [`DOCUMENT_INDEX.md`](DOCUMENT_INDEX.md) 或其「最快定位」表進入。
 
 所有文件格式、命名、語言、證據與更新規則以根目錄 [`AGENTS.md`](../AGENTS.md) 為準。
