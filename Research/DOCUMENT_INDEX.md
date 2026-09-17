@@ -23,7 +23,7 @@ Research/README.md
 | 問題 | 第一入口 |
 |---|---|
 | TCP/UDP、frame、XOR、checksum、核心 dispatcher、UDP movement | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) |
-| TCP dispatcher 完整 opcode → handler、UDP peer/bootstrap、movement/action identity 交叉證據 | [`Core/Network_Dispatcher_Inventory.md`](Core/Network_Dispatcher_Inventory.md) |
+| TCP dispatcher 完整 opcode → handler inventory | [`Core/Network_Dispatcher_Inventory.md`](Core/Network_Dispatcher_Inventory.md) |
 | Login、Server List、`680–696`、MyInfo、`197–221` ClientData | [`Core/Login_ClientData_Protocol.md`](Core/Login_ClientData_Protocol.md) |
 | Character、Appearance、Inventory、Weapon、PG/CASH/CP | [`Core/Character_Inventory_Equipment.md`](Core/Character_Inventory_Equipment.md) |
 | Channel、Lobby、Room、Player、Map、Mode、GameRule、selector | [`Core/Room_GameRule_Mode.md`](Core/Room_GameRule_Mode.md) |
@@ -40,7 +40,7 @@ Research/README.md
 |---|---|
 | [Core/README.md](Core/README.md) | Core 導航與閱讀規則 |
 | [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、codec、integrity/XOR、checksum、核心 dispatcher、UDP movement |
-| [Core/Network_Dispatcher_Inventory.md](Core/Network_Dispatcher_Inventory.md) | `sub_58B010` 完整 TCP opcode → handler inventory、UDP peer/bootstrap、movement/action identity 跨函式證據 |
+| [Core/Network_Dispatcher_Inventory.md](Core/Network_Dispatcher_Inventory.md) | `sub_58B010` 完整 TCP opcode → handler inventory；不重複 packet/schema semantic |
 | [Core/Login_ClientData_Protocol.md](Core/Login_ClientData_Protocol.md) | `680–696` + `197–221` login / MyInfo / ClientData wire protocol |
 | [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character、Appearance、Inventory、Weapon Loadout、Economy runtime/domain model |
 | [Core/Room_GameRule_Mode.md](Core/Room_GameRule_Mode.md) | Channel/Lobby/Room、Player/Slot/Team、Map、selector、Mode、GameRule lifecycle/rules |
@@ -112,7 +112,7 @@ Cross-domain abstraction → Server_State_Model
 
 ## 文件整理原則
 
-舊研究內容已依責任合併到現存主文件；**舊檔名不再作為閱讀入口，也不應重新建立平行版本。**
+舊研究內容已依責任合併到現存主文件；**研究輪次檔、修正檔、同方向證據檔不再作為獨立知識庫。** 同一主題只保留一份 canonical truth，加上一份必要的深度 evidence appendix。
 
 當新增證據時：
 
