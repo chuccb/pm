@@ -2,12 +2,13 @@
 
 > 目標：日本版 PaperMan 2016 年服務終了時的最終 Client。
 > 本文件：Core 唯一導航入口。
-> 更新基準：2026-09-17。
+> 更新基準：2026-09-18。
 
 ## 一眼看懂
 
 ```text
 怎麼傳                         → Network_Protocol.md
+完整 TCP opcode → handler      → Network_Dispatcher_Inventory.md
 登入後玩家資料怎麼傳           → Login_ClientData_Protocol.md
 角色／背包／裝備的 Client 狀態 → Character_Inventory_Equipment.md
 Room / Mode / GameRule         → Room_GameRule_Mode.md
@@ -58,7 +59,8 @@ Extracted/
 
 | 文件 | 唯一責任 |
 |---|---|
-| `Network_Protocol.md` | TCP/UDP transport、frame、codec、integrity/XOR、checksum、dispatcher、UDP movement |
+| `Network_Protocol.md` | TCP/UDP transport、frame、codec、integrity/XOR、checksum、dispatcher 核心、UDP movement |
+| `Network_Dispatcher_Inventory.md` | `sub_58B010` 完整 TCP opcode → handler map、UDP peer/bootstrap evidence；不重複各封包 semantic |
 | `Login_ClientData_Protocol.md` | `680–696` + `197–221` login / MyInfo / ClientData wire protocol |
 | `Character_Inventory_Equipment.md` | Character、Appearance、Inventory、Weapon Loadout、Economy runtime/domain model |
 | `Room_GameRule_Mode.md` | Channel/Lobby/Room、Player/Slot/Team、Map、selector、Mode、GameRule lifecycle/rules |
@@ -80,6 +82,7 @@ Kick Vote 位於 `../KickVote/Research.md`。
 需要 bytes → 該主題文件
     ↓
 需要 frame / transport → Network_Protocol
+需要完整 dispatcher function map → Network_Dispatcher_Inventory
 ```
 
 ### State
