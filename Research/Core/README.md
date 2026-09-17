@@ -8,7 +8,7 @@
 
 ```text
 怎麼傳                         → Network_Protocol.md
-UDP movement/control 深挖       → UDP_Movement_Control_Evidence_2026-09-18.md
+UDP movement/control function-level 深挖 → UDP_Movement_Control_Evidence_2026-09-18.md
 完整 TCP opcode → handler      → Network_Dispatcher_Inventory.md
 登入後玩家資料怎麼傳           → Login_ClientData_Protocol.md
 角色／背包／裝備的 Client 狀態 → Character_Inventory_Equipment.md
