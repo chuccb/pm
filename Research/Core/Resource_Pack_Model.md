@@ -1,9 +1,9 @@
 # PaperMan Resource Pack / Loader 邊界研究
 
-> 研究日期：2026-09-16
+> 研究日期：2026-09-17
 > Target：日本版 PaperMan 2016 年最終 Client
 >
-> 本文件只記錄目前能由 `Extracted/` 與 Client 研究直接支持的 Resource pack / loader 邊界。資源的遊戲語意仍需與 C/LST/ASM caller、runtime object 及 Wiki 繼續交叉驗證。
+> 本文件記錄目前能由 `Extracted/`、IDA C/LST、runtime caller、packet dispatcher、Wiki 直接支持的 Resource pack / loader 邊界。資源檔案的「格式語意」與「玩家可見語意」必須分開處理；沒有足夠交叉證據時維持 `[OPEN]`。
 
 ## 1. `Extracted/0.xml` 是高價值的 pack-to-folder 索引
 
@@ -26,7 +26,7 @@ sounds01 ... sounds92（部分編號存在；並非完全連續）
 
 每個 sound pack 都指定自己的 `filename` 與解包後 `folderpath`。
 
-**[RES:A]** 直接來自 `Extracted/0.xml`。
+**[RES]** 直接來自 `Extracted/0.xml`。
 
 ## 2. Resource domain 與 runtime domain 不應直接畫等號
 
@@ -41,23 +41,9 @@ Pack key
     -> actual usage
 ```
 
-例如：
+不能僅因為資料夾叫 `item` 就宣稱其中某個檔案必定是「玩家 inventory database」；它首先證明的是 client resource domain / pack domain。
 
-```text
-character
-    -> Data\\character.dat
-    -> Extracted/character/*
-
-item
-    -> Data\\item.dat
-    -> Extracted/item/*
-
-map
-    -> Data\\map.dat
-    -> Extracted/map/*
-```
-
-不能僅因為資料夾叫 `item` 就宣稱其中某個檔案必定是「玩家 inventory database」；它首先證明的是 **client resource domain / pack domain**。
+而本輪對 `ui/lang` 與 `ui/cfg` 的研究進一步證明：**Client 還有一層獨立於 `character/item/map` pack domain 的 text/config database subsystem。**
 
 ## 3. Character Resource domain
 
@@ -70,20 +56,11 @@ textures/
 datarevision.txt
 ```
 
-因此 Client 的 Character 資源域至少把：
+因此 Client 的 Character 資源域至少把 animation、model、texture、revision 放在同一個 `character` pack domain 下。
 
-```text
-animation
-model
-texture
-revision
-```
+**[RES]** directory topology + `0.xml` pack mapping。
 
-放在同一個 `character` pack domain 下。
-
-**[RES:A]** directory topology + `0.xml` pack mapping。
-
-這對 Server reconstruction 的含義是：
+Server reconstruction 應分離：
 
 ```text
 CharacterIdentity
@@ -91,7 +68,7 @@ CharacterIdentity
 CharacterRenderAsset
 ```
 
-Server 需要保存的是 player/character 的語義 ID / state；Client 再使用 character resource domain 決定模型、材質與動畫。兩者不可因檔案名稱直接合併。
+Server 保存玩家／角色語義 ID 與 state；Client 再透過 resource domain 取得模型、材質、動畫。
 
 ## 4. Item Resource domain 的內部分層
 
@@ -103,15 +80,6 @@ object/
 thumb/
 weapon/
 datarevision.txt
-```
-
-這是一個重要結構證據：Client item domain 並不是單一「weapon」類型，而至少存在：
-
-```text
-Avatar asset domain
-Object asset domain
-Thumbnail/UI representation domain
-Weapon asset domain
 ```
 
 `weapon` 又至少分成：
@@ -132,15 +100,7 @@ sounds/
 textures/
 ```
 
-**[RES:A]** directory topology。
-
-因此目前 Server data model 不應寫成：
-
-```text
-Item = Weapon
-```
-
-而應保留較一般化的：
+因此：
 
 ```text
 ItemIdentity
@@ -148,7 +108,9 @@ ItemCategory
 ItemState
 ```
 
-再由 category 映射至 avatar / weapon / object 等 Client resource domain。
+應先保持一般化，再由 category 映射至 avatar / weapon / object 等 Client resource domain。
+
+**[RES]** directory topology。
 
 ## 5. Map Resource domain
 
@@ -170,20 +132,6 @@ sounds/
 textures/
 ```
 
-特別值得注意的是：
-
-```text
-maplist.dat
-```
-
-與實際：
-
-```text
-maps/
-```
-
-同時存在。
-
 因此：
 
 ```text
@@ -192,7 +140,7 @@ MapList / map-selection metadata
 actual map asset
 ```
 
-這與目前 `121/122/129` 的 Client data-flow 非常重要：
+目前既有 GameRule 研究已經得到：
 
 ```text
 GAMEROOM_SCROLL_MAP
@@ -201,9 +149,9 @@ GAMEROOM_SCROLL_MAP
     -> 129 start parameter
 ```
 
-而 `Extracted/map` 又存在 `maplist.dat` + `maps/` 兩層，故不能直接把 selector byte 當作檔案名稱、array index 或 physics map object；需要繼續追 loader conversion。
+而 `Extracted/map` 又存在 `maplist.dat` + `maps/` 兩層，所以不能直接把 selector byte 當作檔案名稱、array index 或 physics map object。
 
-**[RES:A]** map domain topology + existing `Map_And_Room.md` client evidence。
+**[RES]** map domain topology + existing Room/GameRule C evidence。
 
 ## 6. `datarevision.txt` 的交叉證據
 
@@ -213,20 +161,20 @@ GAMEROOM_SCROLL_MAP
 811034967
 ```
 
-因此至少可以確認：這些 domain 在目前 Extracted 版本中共享相同的 revision value。
+因此這些 domain 在目前 Extracted 版本中共享同一 revision value。
 
-此外既有 Login 研究已確認 `GL_LOGIN_REQ (682)` 的 serializer 使用與 datarevision 相關的 state，因此：
+既有 Login 研究另已確認 `GL_LOGIN_REQ (682)` 的 serializer 使用與 datarevision 相關的 state，因此：
 
 ```text
 Client resource revision
     -> login bootstrap compatibility input
 ```
 
-是目前很強的 cross-domain 線索。
+是很強的 cross-domain 線索。
 
-但目前還不能把 `811034967` 命名成 server protocol version / build number；它首先是 client data revision value。
+但不能把 `811034967` 命名成 server protocol version；它首先被證明是 client data revision value。
 
-**[RES:A]** revision files；**[C]** Login serializer data-flow。
+**[RES]** revision files；**[C]** Login serializer data-flow。
 
 ## 7. `ClientDataList.xml` 的意義
 
@@ -244,218 +192,974 @@ Client resource revision
 <DataList key="ClientDataList.xml" />
 ```
 
-因此 Client 另有一層「client data list」索引概念，並非所有資料都經 `character/item/map` 三個 PackFile domain。
+因此 Client 另有一層 `ClientDataList` 索引概念，並非所有資料都經 `character/item/map` 三個 PackFile domain。
 
-這意味：
+**[RES]** `ClientDataList.xml`。
+
+## 8. `ui/lang/msgtableres.lang`：它不是普通 key/value 語言檔
+
+### 8.1 檔案身份
+
+目前 `Extracted/ui/lang` 的語言資源中直接存在：
 
 ```text
-PackFile domain
+msgtableres.lang
+```
+
+檔案開頭明確寫：
+
+```text
+// This file was automatically generated. (CyLangPackTool generated include file)
+// - 2014/11/26 : 15.54.51 -
+```
+
+後面是一個**按固定順序排列的純文字 message list**，例如：
+
+```text
+フリーチャンネル %02d
+メッセージ
+差出人
+%d PG
+%d PG - 期間
+%d CASH
+%sさんは%d番爆弾の設置を開始しました。
+%d番爆弾が爆発!!!
+個人サバイバル
+ゲームルーム作成中…
+ルームが存在しません。
+アイテム購入成功
+キャラクター購入成功
+```
+
+這證明它的內容不是一般配置參數，而是玩家可見的 localized message / format-string catalog。
+
+**[RES]** 檔案內容本身。
+
+### 8.2 Client 如何載入
+
+IDA 中可見 language loader 會組造：
+
+```text
+lang\\<locale-selected-name>.lang
+```
+
+若該 locale 路徑沒有成功，則 fallback 到：
+
+```text
+lang\\MsgTableRes.lang
+```
+
+這條路徑與 Client 的 message table singleton 初始化相連。fileciteturn353file4L957-L998
+
+### 8.3 真正的 key 是「ordinal message ID」
+
+這是目前最重要的結論。
+
+runtime lookup `sub_408080(this, a2)` 並不是做字串 key lookup；它先以：
+
+```text
+record_count = (end - begin) / 28
+```
+
+檢查 `a2`，然後直接訪問：
+
+```text
+record = begin + 28 * a2
+return record.string
+```
+
+所以 `a2` 是**訊息表的 ordinal ID / index**。fileciteturn354file2L468-L505
+
+因此在 Server reconstruction / Client compatibility 中應把它理解成：
+
+```text
+MessageId (ordinal)
+    -> localized format string
+```
+
+而不是：
+
+```text
+"SOME_NAME" -> string
+```
+
+### 8.4 `.lang` 與 `CyMsgTableID` 名稱層是兩件事
+
+IDA 中另有 `sub_6849D0()`，會把 runtime message records 輸出成：
+
+```text
+enum CyMsgTableID
+{
+    <symbol>, // <string>
+    ...
+    IDMT_TOTALCOUNT
+};
+```
+
+而 `sub_684770()` 則會把相同 message records 輸出成一行一個 string 的 `.lang`。fileciteturn352file2L406-L442 fileciteturn352file3L467-L520
+
+所以應該建立三層概念：
+
+```text
+CyMsgTableID symbol
+        ↓ compile-time name layer
+ordinal message ID
+        ↓ runtime lookup
+localized string in msgtableres.lang
+```
+
+目前 Extracted repository 中沒有看到對應完整的 `CyMsgTableID` 原始 enum/header，因此**不能反過來從 `.lang` 猜出 symbol name**。
+
+### 8.5 runtime record stride `28` 不是 `.lang` 的 wire format
+
+`28` 是 runtime message table record 的 stride；`sub_408080()` 以 `begin + 28 * index` 取 record，並依 small-string / heap-string capacity 決定字串位置。fileciteturn354file2L468-L494
+
+因此：
+
+```text
+28-byte runtime record
     !=
-全部 Client-side data source
+一行 .lang 的檔案大小
+    !=
+network packet field size
 ```
 
-`ui`、`effect`、`data.pat`、`convars.pat` 等也可能參與 runtime behavior / rendering / configuration，後續 Resource research 不應只掃 `character/item/map`。
+這個界線在後續 LLM 逆向時非常重要。
 
-**[RES:A]** `ClientDataList.xml`。
+### 8.6 Message ID 可以直接參與 gameplay/UI 邏輯
 
-## 8. Wiki 與 Resource domain 的互相驗證
-
-日本 Wiki 的玩家可見分類包含：
+Client 大量呼叫：
 
 ```text
-Character
-Character clothing / avatar
-Weapons
-Main / Sub / Melee / Grenade
-Paper Puzzle / Skill
+sub_408140()
+    -> sub_408080(message_id)
+    -> sub_407F90(format, ...)
 ```
 
-例如角色頁將 Character 與 package、face/expression、hairstyle、set clothing、top、bottom、shoes、accessory 分開列示；武器則按 main、sub、melee、throwing 等分類。
+例如目前 C 中可直接看到 `795`、`796`、`801`、`813`、`820`、`827`、`828` 等 message ID 被拿來建立玩家可見文字。fileciteturn353file2L451-L510
 
-因此 Wiki 的玩家概念分類與 `Extracted/item` 中存在 `avatar` / `weapon` / `object` 等獨立 resource domains 是相互兼容的。
-
-但這只能證明分類層的吻合，**尚不足以證明每個 Wiki item ID 對應哪個 binary asset ID**。
-
-**[WIKI:C]** 玩家可見分類；**[RES:C]** resource topology。
-
-## 9. 2016 年 Wiki 對 Equipment / Weapon state 的硬約束
-
-日本 Wiki 的「武器耐久値情報」頁最後修改於 **2016-03-19**，因此相較於大量後來整理頁，它是目前很有價值的 final-service-period 外部證據。
-
-頁面直接描述：
+因此 `msgtableres.lang` 可以拿來反查：
 
 ```text
-PG/CASH 的無期限主武器、無期限副武器
-    -> 各自存在修理耐久值
-
-戰鬥使用
-    -> 耐久值下降
-
-途中退出
-    -> 額外耐久度 penalty
+numeric constant in C
+    -> actual Japanese text
+    -> observable UI/gameplay semantic
 ```
 
-並指出耐久低於約 **19%** 後開始出現性能下降，Wiki 列出的受影響性能包括：
+這對目前大量 `[OPEN]` 的 event、error、room、combat、quest 研究非常有價值。
+
+### 8.7 禁止混淆的另一個 table
+
+`dword_EE3D88` 是另一個文字驗證／禁止字詞相關 table；Client 會用 `sub_52B4F0()` 對 nickname / string 做檢查。它不是 `msgtableres.lang` message table。
+
+因此：
 
 ```text
-威力
-精度
-連射速度
+MessageTable
+    !=
+profanity / invalid-name table
 ```
 
-同時不同武器種類有不同基準耐久等級，例如 SG=A+、SMG=A+、AR=A、SR=B、副武器=S；個別武器仍可能有獨立例外值。citeturn310115search0
+## 9. `ui/cfg/*.pat` 的完整清單
 
-這對 Server reconstruction 的直接意義是：
+目前 `Extracted/ui/cfg` 中的 `.pat` **剛好是六個**：
 
 ```text
-WeaponIdentity
-WeaponOwnership / Inventory record
-Durability state
-Expiry / Rental state
+Quest.pat
+RecommandItem.pat
+itemdata.pat
+maplist.pat
+partsability.pat
+weaponparts.pat
 ```
 
-不應被壓成單一 `EquippedWeaponId`。
+`Map.dat`、`pm_lobbydata.dat` 是其它 config/data；它們不屬於本輪「全部 `.pat`」六檔範圍。
 
-Wiki 的新手教學另外描述永久武器與期間武器的差異：期間武器會在期間結束後消失，但不因使用而損壞；永久武器則可能因使用而損壞、需要修理。這再次支持：
+另外：
 
 ```text
-Item identity
-+ ownership
-+ durability
-+ expiry/period
+data.pat
+convars.pat
 ```
 
-應是不同 state 維度，而不是同一個 boolean。citeturn310115search4
+存在於更廣義 ClientData 資料層，但不在 `ui/cfg/`，不可把它們誤算成這六檔。
 
-**[WIKI:A/B]** 2016-period weapon durability documentation；但精確 server wire fields 仍待 Client C/LST/ASM 對應。
-
-## 10. Package / acquisition 不應與 Item object 合併
-
-Wiki 的角色頁可以直接看到：角色與角色 package 是分開列示的；例如某些角色 package 同時包含：
+六個 `.pat` 的共同特徵是：
 
 ```text
-Character
-Set clothing
-Paper Puzzle
+cfg\\<file>.pat
+    ↓
+pmFile loader
+    ↓
+CRLF-separated text
+    ↓
+comma-separated columns
+    ↓
+fixed-size runtime record / index
 ```
 
-而角色已購買時，對應 Character Package 不能再次購買。citeturn311917search3turn311917search4
+目前看到的 `sub_931720`、`sub_95C9A0`、`sub_9F5C00` 都是直接掃到 comma / CRLF 的欄位切割器，而不是完整 CSV parser；不能假定有一般 CSV 的 quoted-field / escaping semantics。
 
-因此 Server model 更適合拆成：
+共同原則仍然是：
 
 ```text
-PackageDefinition
-    -> acquisition / grant rules
+.pat file row
+    !=
+runtime record
+    !=
+network packet
+```
 
-ItemDefinition
-    -> concrete item
+## 10. `Quest.pat`：Quest subsystem 的大型靜態資料表
 
+Client 的 loader 是 `sub_931790()`，明確開啟：
+
+```text
+cfg\\Quest.pat
+```
+
+它把第一行解析成總筆數，跳過表頭區，然後以：
+
+```text
+0x3090 = 12432 bytes / runtime record
+```
+
+建立每筆資料。fileciteturn355file2L883-L928
+
+每列欄位是 comma-separated，會被寫入大量固定 runtime offsets；其中已可直接確認：
+
+```text
++0      int key
++4      bool-like flag
++8      int
++4108   int
++5136   int
++5140   wide string
++6164..6180  5 ints
++6184..6200  5 ints
++6204   wide string
++7228..7240  4 ints
++7244   wide string
++8268   wide string
++9292..9304  4 ints
++9308..9316  3 ints
++9320..9328  3 ints
++9332..9340  3 ints
++9344   int
++9348   int
++9352   int
++9356   wide string
++10380  wide string
++11404  wide string
++12428  bool-like flag
+```
+
+原始 C 逐欄 parse 的證據見 `sub_931790()`。fileciteturn355file2L947-L1128
+
+### 10.1 key namespace
+
+Loader 之後直接依：
+
+```text
+key / 10000
+```
+
+分流：
+
+```text
+== 1       -> sub_927870
+== 2/3/4   -> sub_92A870 + sub_9216B0
+```
+
+這證明 `key / 10000` 是 Quest subsystem 內部的重要 namespace/class discriminator。fileciteturn355file2L1106-L1121
+
+但它**還不能單獨證明**是「Quest 類型 1/2/3/4」的玩家可見 enum，因此正式研究名稱仍應寫成：
+
+```text
+QuestKeyNamespace = key / 10000
+```
+
+精確公開語意 `[OPEN]`。
+
+### 10.2 與現有 Quest/Event packet 研究的關係
+
+目前 `Result_Quest_Stats.md` 已經還原 `sub_92EF00()` 的 Quest/Event mutation graph；`Quest.pat` 則提供了「定義資料」一側。
+
+因此下一階段可用：
+
+```text
+Quest.pat key
+    ↕
+sub_92EF00(id, subtype, amount, filter)
+    ↕
+message ID / quest UI string
+    ↕
+Wiki quest/event description
+```
+
+來封閉目前很多 `[OPEN]` 的 public semantic。
+
+目前不能把：
+
+```text
+sub_92EF00(35,...)
+```
+
+直接命名為「Quest 35」；既有 C evidence 已證明第二參數等也有獨立語義，ID namespace 必須分別處理。
+
+## 11. `itemdata.pat`：Item Definition / UI effect / durability defaults 的核心資料庫
+
+Client 的 loader `sub_52E1C0()` 明確開啟：
+
+```text
+cfg\\ItemData.pat
+```
+
+並從檔案取得：
+
+```text
+version-like first value
+record count
+```
+
+然後建立：
+
+```text
+0x710 = 1808 bytes / runtime row
+```
+
+的固定記憶體記錄。fileciteturn355file0L117-L136
+
+已直接確認的重要欄位：
+
+```text
++0       int key
++4       int
++8       int
++12      int
++16      variable blob
++528     blob length
++532     byte
++533     byte
++534..536 3 bytes
++540,+544,+548  3 x 4-byte values
++552..636      22 x 4-byte values
++640,+641      bytes
++644       int
++648       variable 16-bit data area
++1160      count for variable area
++1164,+1165 bytes
++1168..1184   5-byte region
++1188..1192   5-byte region
++1196      int
++1200,+1202 runtime-initialized to 0
++1204      4-byte static value
++1208,+1209 version-conditional values
++1212..1240 several 4-byte values
++1248,+1252 4-byte values
++1272      byte
++1273      bool-like derived state
++1276      runtime-initialized -1
++1280      runtime state
++1284..1795 runtime 0x200-byte buffer
++1796,+1800,+1804 runtime state/defaults
+```
+
+其中 `+1273` 並非檔案直接欄位，而是 loader 計算 `+584..+608` 若干值中是否存在正值後得到的衍生 bool。fileciteturn355file0L217-L267
+
+### 11.1 durability 的交叉驗證
+
+既有 Character/Inventory 研究已從 runtime helper 確認：
+
+```text
+sub_534450(resourceIdentity, int16)
+    -> runtime +1200 / +1202
+```
+
+而 `itemdata.pat` loader 本身又把：
+
+```text
++1200 = 0
++1202 = 0
++1204 = file-derived value
+```
+
+因此：
+
+```text
++1200/+1202
+    = mutable runtime durability state
+
++1204
+    = static/base durability-related value
+```
+
+已達 `[X]` 等級；但 exact unit / wire conversion 仍是 `[OPEN]`。
+
+### 11.2 Item resource 與 itemdata.pat 的關係
+
+`itemdata.pat` 的 row key 還會進入 lookup；而特定 key range 會觸發額外 runtime index / UI weapon effect initialization。fileciteturn355file0L315-L369
+
+因此它是：
+
+```text
+ItemDefinition / ItemConfig
+    -> runtime item tables
+    -> UI / effect metadata
+    -> weapon/item behaviour helpers
+```
+
+不是：
+
+```text
 PlayerInventory
-    -> owned item instances / records
 ```
 
-目前不能把「Shop Package」直接視為一個可裝備 Item。
+### 11.3 Server 邊界
 
-**[WIKI:C]** package composition / acquisition behavior；**[OPEN]** 對應到 2016 final Client packet schema 尚未完全封閉。
-
-## 11. 對 Server reconstruction 的直接約束
-
-目前較穩健的 server model 應分離：
+因此 Server 應分離：
 
 ```text
-Player
-├─ CharacterState
-├─ InventoryState
-├─ EquipmentState
-└─ LoadoutState
+ItemDefinition
+    !=
+PlayerOwnedItem
 ```
 
-Weapon record 至少應保留語義上的獨立維度：
+而 `itemdata.pat` 更接近 Definition / static configuration 一側。
+
+## 12. `weaponparts.pat`：武器零件組合／關聯表
+
+Client 的 loader `sub_95CA10()` 明確開啟：
 
 ```text
-ItemId
-Ownership
-Category
+cfg\\weaponparts.pat
+```
+
+它建立：
+
+```text
+0x170 = 368 bytes / runtime row
+```
+
+的記錄。每列的已知結構為：
+
+```text
++0        int key
++4..+40   10 x int
++44..+80  10 x int
++84..+120 10 x int
++124..+160 10 x int
++164..+200 10 x int
++204..+240 10 x int
++244..+280 10 x int
++284..+316 9 x int
++320      int
+```
+
+也就是精確的：
+
+```text
+1 key
++ 10 / 10 / 10 / 10 / 10 / 10 / 10 / 9 integer references
++ 1 trailing integer
+```
+
+loader / row materialization 證據見 `sub_95CA10()`。fileciteturn355file3L1247-L1371
+
+### 12.1 八組 integer reference arrays 有實際 runtime 消費者
+
+`sub_958140()` 明確把參數 `1..8` 映射到：
+
+```text
+1 -> +4..+40
+2 -> +44..+80
+3 -> +84..+120
+4 -> +124..+160
+5 -> +164..+200
+6 -> +204..+240
+7 -> +244..+280
+8 -> +284..+316
+```
+
+並逐一測試候選 ID 是否存在其中。這不是死資料；後續 `sub_956BB0`、`sub_957070`、`sub_957140`、`sub_957200`、`sub_9574E0`、`sub_957C20` 等都把這些欄位當成 runtime part/component 關聯來消費。fileciteturn357file2L1326-L1396
+
+因此高信心結論是：
+
+```text
+weaponparts.pat
+    -> weapon/part relation definitions
+    -> runtime component selection / matching
+```
+
+### 12.2 與 network packet 的直接交叉確認
+
+Client packet registration 直接存在：
+
+```text
+207  GS_BUY_WEAPONPARTS_ACK
+912  GL_WEAPONPARTS_EQUIP_CHANGE_REQ
+913  GL_WEAPONPARTS_EQUIP_CHANGE_ACK
+```
+
+對應 C evidence：
+
+```text
+207 -> packet registration
+912 -> Packet::ctor(912) + fields
+913 -> response registration / receiver
+```
+
+`912` request 的 serializer 至少直接寫入：
+
+```text
+sub_592920(v8, 0)
+sub_592AA0(v8, a5)
+sub_592AA0(v8, thisa)
+sub_555090(&dword_1321D00, v8)
+```
+
+證明武器零件裝備變更是正式 network operation，而不是純 client UI 狀態。fileciteturn359file0L1-L14 fileciteturn359file1L16-L29 fileciteturn359file2L31-L44 fileciteturn362file1L174-L187
+
+但是目前還**不能**把八組欄位直接命名成 `Scope/Barrel/Muzzle/...` 等公開 slot 名稱。這需要 `.lang` / UI config / item resource / Wiki 再做一輪一對一證明。
+
+## 13. `partsability.pat`：零件 ability / parameter table，但公開欄位名稱仍未完全封閉
+
+Client 的 `partsability.pat` loader 建立：
+
+```text
+0x106C = 4204 bytes / runtime row
+```
+
+並以第一欄 key 建 lookup。
+
+目前可以確定它不是單純字串資源；每列包含一組固定的數值欄位，核心欄位區域落在：
+
+```text
++0      int key
++4..+48    多個 float-like numeric parameters
++52..+96   多個 additional numeric parameters
++100,+104 integer parameters
+```
+
+更重要的是，`sub_956240(key)` 會從這個 table 取回對應 record 的 `+16` 值；而 `sub_958140()` 等 consumer 又依照與 `weaponparts.pat` 相同的八組 part/reference 結構進行 component matching。這說明兩個檔案是同一個武器零件 runtime subsystem 的不同資料層：
+
+```text
+weaponparts.pat
+    -> 哪些 part / component 關聯
+
+partsability.pat
+    -> part 對應的 numeric ability/config parameters
+```
+
+**[C]** loader + consumer；**[X]** 與 weapon-part runtime graph；**[OPEN]** 每個 numeric column 的公開玩家語意與 exact formula。
+
+不能直接把 `+16` 命名成 Damage / Accuracy / Recoil 等，直到找到對應 calculation caller + Wiki/resource evidence。
+
+## 14. `maplist.pat`：地圖 catalog / runtime map parameters
+
+Client 的 loader `sub_723B10()` 明確開啟：
+
+```text
+cfg\\maplist.pat
+```
+
+第一行被讀成：
+
+```text
+float-like version value
+```
+
+第二個值作為 record count；每列 materialize 成：
+
+```text
+0x344 = 836 bytes / runtime record
+```
+
+fileciteturn355file1L409-L471
+
+已直接確認欄位布局：
+
+```text
++0      int
++4      int
++8..+135      128-byte block
++136..+263    128-byte block
++264..+391    128-byte block
++392..+519    128-byte block
++520..+647    128-byte block
++648..+775    128-byte block
++776/+780     pair
++784/+788     pair
++792/+796     pair
++800/+804     pair
++808/+812     pair
++816          int
++820          int
++824          optional field if version >= 1.02
++828          optional field if version >= 1.03
++832          int
+```
+
+fileciteturn355file1L472-L537
+
+### 14.1 它不是實際地圖 asset
+
+loader 後續還會建立：
+
+```text
+qp_engine::CMapData
+CEntityManager
+其他 map runtime subsystems
+```
+
+因此 `maplist.pat` 是 **catalog/config + map-runtime parameters**，不是 `maps/` 裡面的實際場景資產。fileciteturn355file1L552-L613
+
+### 14.2 與 121/122 GameRule map selector 的關係
+
+目前只能確定它與 map subsystem 同域，而且與 `Extracted/map/maplist.dat` 都存在於 Client map pipeline。
+
+不能直接假定：
+
+```text
+maplist.pat row key
+    ==
+121/122 map value
+    ==
+maplist.dat index
+    ==
+actual map resource folder name
+```
+
+這四者必須由 caller conversion 一一閉環。
+
+## 15. `RecommandItem.pat`：推薦物品參數資料，而非 inventory
+
+Client 的 loader `sub_9F5C80()` 明確開啟：
+
+```text
+cfg\\RecommandItem.pat
+```
+
+它建立：
+
+```text
+0x30 = 48 bytes / runtime record
+```
+
+第一行為 record count，第二行另有一個 integer metadata/value；資料列則是固定數量的 integer columns：
+
+```text
++0
++4
++8
++12
++16
++20
++24
++28
++32
++36
++40
++44
+```
+
+即 12 個 integer fields。fileciteturn357file0L71-L164
+
+### 15.1 runtime 名稱已提供很強語意證據
+
+後續 `sub_9F6B30()` 的 log 明確出現：
+
+```text
+CRecommandItemParamCtrl::SetAllConceptTypeItem
+```
+
+並把選出的 row 欄位 +3..+11 拷貝到 concept-type item runtime table。fileciteturn357file1L714-L744
+
+所以目前高信心結論是：
+
+```text
+RecommandItem.pat
+    -> recommended-item parameter definitions
+    -> concept-type recommendation runtime state
+```
+
+而不是：
+
+```text
+PlayerInventory
+```
+
+`key == 2498` 雖然在 loader 中有 special branch，但不能僅依這個值猜 public semantic。
+
+## 16. 六個 `.pat` 的統一資料模型
+
+目前整體已可穩定整理成：
+
+```text
+ui/cfg/
+│
+├─ Quest.pat
+│    └─ Quest subsystem definitions / indexed quest data
+│
+├─ itemdata.pat
+│    └─ Item definition / item runtime metadata / UI-effect inputs
+│
+├─ maplist.pat
+│    └─ Map catalog + map-runtime parameters
+│
+├─ weaponparts.pat
+│    └─ Weapon-part relation / component groups
+│
+├─ partsability.pat
+│    └─ Part ability / numeric parameter definitions
+│
+└─ RecommandItem.pat
+     └─ Recommended-item / concept-type recommendation parameters
+```
+
+而：
+
+```text
+ui/lang/msgtableres.lang
+    └─ localized player-facing message catalog
+       indexed by ordinal MessageId
+```
+
+兩者的責任完全不同：
+
+```text
+message resource
+    -> 把 numeric message ID 轉成玩家看得到的文字
+
+.pat config databases
+    -> 把 static ID/key 轉成 gameplay/UI/resource runtime parameters
+```
+
+因此不可把 `.lang` 與 `.pat` 當成同一種 config format。
+
+## 17. 與 Wiki 的正確交叉驗證方式
+
+目前 Wiki 能提供的是玩家可見語意，例如：
+
+```text
+Weapons
+Characters
+Avatar / clothing
+Modes
+Quest
+Shop / Package
 Durability
-Expiry / Period
-EquippedState
+UI-visible actions / room behavior
 ```
 
-但上述名稱目前部分仍屬 server-side reconstruction model，不是已證明的 wire schema。
-
-以及 Client resource resolution：
+而 `.pat` 提供的是：
 
 ```text
-CharacterIdentity
-    -> character resource domain
-
-ItemIdentity + category
-    -> item/avatar/weapon/object resource domain
-
-EquippedWeaponIdentity
-    -> weapon resource domain
+static ID
+field grouping
+numeric parameter
+lookup relation
+version gating
+runtime consumer
 ```
 
-尤其目前 197 `GL_MYINFO_REQ` 的 response 尚未封死，因此不能把 Character / Inventory / Equipment 欄位硬塞進 197 的 schema。
-
-## 12. 目前最大的 OPEN
-
-下一步仍然必須由 Client data-flow 逐層確認：
+最有價值的交叉方式不是「檔名像不像」，而是：
 
 ```text
-197 GL_MYINFO_REQ
-   ↓
-receiver / response
-   ↓
-player profile object
-   ↓
-CharacterState
-   ↓
-Inventory records
-   ↓
-Equipment / Loadout
-   ↓
-Weapon identity / durability / expiry / ammo-related state
+Wiki visible concept
+        ↕
+message ID / UI text
+        ↕
+.pat key or numeric row
+        ↕
+IDA runtime consumer
+        ↕
+packet / state mutation
 ```
 
-同時需要繼續搜尋：
+例如武器零件目前已經有：
 
 ```text
-item loader / parser
-character loader / parser
-weapon loader / parser
-UI inventory builder
-MyCharacter screen
-Present / Gift screen
+weaponparts.pat
+    ↕
+part runtime matching
+    ↕
+207 / 912 / 913 network operations
 ```
 
-直到可以形成：
+而 message table 又可以提供 UI-visible Japanese strings 作為最後一層語意驗證。
+
+Quest 同樣可以形成：
 
 ```text
-Wiki item
- ↕
-Resource identity
- ↕
-Client runtime object
- ↕
-Packet field
- ↕
-Server state
+Quest.pat
+    ↕
+Quest runtime object
+    ↕
+sub_92EF00 event mutation
+    ↕
+msgtableres.lang / Quest UI
+    ↕
+Wiki Quest / Event behavior
 ```
 
-## 13. 不應提前下的結論
+這種閉環才足以把 `[OPEN]` 升成 `[X]`。
 
-目前證據不足以下列結論：
+## 18. 對 Server reconstruction 的最重要邊界
+
+目前 resource subsystem 應至少拆成：
 
 ```text
-item.dat = database inventory schema
-character.dat = player-owned character list
-maplist.dat value = universal map_id
+StaticDefinition
+├─ ItemDefinition
+├─ QuestDefinition
+├─ MapDefinition / MapConfig
+├─ WeaponPartDefinition
+├─ PartAbilityDefinition
+└─ RecommendationDefinition
+
+LocalizedText
+└─ MessageId -> LocalizedFormatString
+
+RuntimeState
+├─ PlayerInventory
+├─ CharacterState
+├─ EquipmentState
+├─ WeaponPartEquipState
+├─ QuestProgress / EventState
+└─ Match / Gameplay State
+```
+
+其中：
+
+```text
+.pat row
+    !=
+Player-owned state
+```
+
+但某些 `.pat` 欄位會直接決定 runtime calculation / UI / equip validation，因此 Server compatibility model 必須能查到對應 static definition。
+
+## 19. `[OPEN]` 與禁止猜測清單
+
+目前仍不能僅依 resource filename 或 numeric offset 下列結論：
+
+```text
+itemdata.pat field +X = 某個公開 ItemType enum
+weaponparts.pat group 1..8 = 某八種固定零件槽名稱
+partsability.pat +16 = Damage / Accuracy / Recoil 等具體 stat
+Quest.pat key/10000 = 玩家看到的 QuestType enum
+maplist.pat key = universal map_id
+maplist.pat row = actual map asset
+RecommandItem.pat concept type = 某個公開 Shop category
+msgtableres.lang 第 N 行 = 某個英文/C++ symbol name
 811034967 = network protocol version
-197 response = complete inventory packet
-weapon directory name = exact server ItemType enum
-Wiki durability percentage = exact wire durability unit
-PackageDefinition = same entity as ItemDefinition
 ```
 
-這些全部保留 OPEN。
+只有在出現：
+
+```text
+[C] runtime calculation / caller
++ [RES] exact resource row / string
++ [WIKI] player-visible behavior
+```
+
+至少兩層獨立證據一致時，才應升級成 `[X]` 或具體公開 semantic。
+
+## 20. 目前最值得繼續封閉的四條鏈
+
+### A. Message ID closure
+
+```text
+numeric ID in C
+    -> msgtableres.lang exact line
+    -> caller context
+    -> Japanese UI meaning
+```
+
+這可以批量降低 C 中大量 `sub_408080(v, 0xNNN)` 的黑盒程度。
+
+### B. Weapon-part closure
+
+```text
+weaponparts.pat group
+    -> part/item resource ID
+    -> UI string / icon
+    -> Wiki weapon-part concept
+    -> 912/913 payload field
+```
+
+這是目前最有希望直接解出正式 weapon-part slot semantics 的鏈。
+
+### C. Quest closure
+
+```text
+Quest.pat key / row
+    -> Quest runtime offset
+    -> sub_92EF00 / 243 / 245 / 381..389
+    -> message string
+    -> Wiki Quest/Event
+```
+
+### D. Map closure
+
+```text
+maplist.pat key / row
+    -> map resource ID
+    -> GAMEROOM_SCROLL_MAP
+    -> 121/122
+    -> 129
+    -> actual map resource folder
+    -> Wiki map/mode
+```
+
+這四條鏈都不應靠猜測補洞。
+
+## 21. 最終目前的 Resource 認知模型
+
+現在可以把 PaperMan 的 client-side static resource subsystem 穩定理解成：
+
+```text
+                         ┌─ character.dat ── character assets
+Pack / Asset layer ──────┼─ item.dat ─────── item/avatar/weapon/object assets
+                         └─ map.dat ──────── map assets
+
+                         ┌─ msgtableres.lang ── MessageId -> localized text
+UI / Config layer ───────┼─ Quest.pat
+                         ├─ itemdata.pat
+                         ├─ maplist.pat
+                         ├─ weaponparts.pat
+                         ├─ partsability.pat
+                         └─ RecommandItem.pat
+
+                                   ↓
+                           runtime definition/index
+                                   ↓
+                    Client UI / gameplay / validation
+                                   ↓
+                       packet / state / result behavior
+                                   ↓
+                         Server reconstruction
+```
+
+最重要的邊界是：
+
+```text
+resource definition
+    !=
+runtime player state
+    !=
+network wire schema
+```
+
+但三者存在大量明確 cross-reference。逆向工作真正要做的是把：
+
+```text
+ID / key
+→ static definition
+→ runtime consumer
+→ player-visible message
+→ packet/state mutation
+```
+
+完整閉環，而不是單獨猜其中任一層。
