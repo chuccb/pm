@@ -13,30 +13,32 @@
     ↓
 先找「第一入口」
     ↓
-必要時進入同列的「深入證據」
+必要時進入同列的「深入資料」
     ↓
 遇到矛盾 → 回 C / LST / Extracted / Wiki
     ↓
 不要從另一份摘要重新拼出第三套真相
 ```
 
-### 最快定位
+## 最快定位
 
 | 問題 | 第一入口 | 深入資料 |
 |---|---|---|
 | 網路 frame、XOR、checksum、Dispatcher | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) | [`Core/UDP_Move_Inf_DeepEvidence.md`](Core/UDP_Move_Inf_DeepEvidence.md) |
 | `165/166 Y_TCP_INF` | [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) | [`Core/Combat_Damage.md`](Core/Combat_Damage.md)、[`Core/Result_Quest_Stats.md`](Core/Result_Quest_Stats.md) |
-| Login／Server List／`680–696` | [`Core/Login_Adjacent_680_696_Field_Schema.md`](Core/Login_Adjacent_680_696_Field_Schema.md) | [`Core/MyInfo_198_ClientData_Field_Schema.md`](Core/MyInfo_198_ClientData_Field_Schema.md) |
+| `960–963` 武器丟棄／拾取 | [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) | 該文件 `960–963` 章節 |
+| Login／Server List／`680–696` | [`Core/Login_Adjacent_680_696_Field_Schema.md`](Core/Login_Adjacent_680_696_Field_Schema.md) | [`Core/ClientData_Shared_Decoder_Field_Evidence.md`](Core/ClientData_Shared_Decoder_Field_Evidence.md) |
+| `198` MyInfo／Avatar bootstrap | [`Core/MyInfo_198_ClientData_Field_Schema.md`](Core/MyInfo_198_ClientData_Field_Schema.md) | Shared ClientData wire family |
 | Character／Appearance／Inventory／Weapon | [`Core/Character_Inventory_Equipment.md`](Core/Character_Inventory_Equipment.md) | [`Core/ClientData_Shared_Decoder_Field_Evidence.md`](Core/ClientData_Shared_Decoder_Field_Evidence.md) |
 | `198/200/203/218/220/221` wire layout | [`Core/ClientData_Shared_Decoder_Field_Evidence.md`](Core/ClientData_Shared_Decoder_Field_Evidence.md) | [`Core/MyInfo_198_ClientData_Field_Schema.md`](Core/MyInfo_198_ClientData_Field_Schema.md) |
-| PG／CASH／CP | [`Core/Currency_State_Field_Evidence.md`](Core/Currency_State_Field_Evidence.md) | 回各 packet 主文件看上下文 |
-| Channel／Lobby／Room／Player／Map／GameRule | [`Core/Room_Lobby_GameRule.md`](Core/Room_Lobby_GameRule.md) | `101–192`、`193–221` Field Evidence、[`Core/Room_Settings_Packets.md`](Core/Room_Settings_Packets.md) |
+| PG／CASH／CP | [`Core/Currency_State_Field_Evidence.md`](Core/Currency_State_Field_Evidence.md) | 回 [`Core/Room_Channel_GameRule_101_221_Field_Evidence.md`](Core/Room_Channel_GameRule_101_221_Field_Evidence.md) 看 packet context |
+| `101–221` Room／Channel／GameRule packet bytes | [`Core/Room_Channel_GameRule_101_221_Field_Evidence.md`](Core/Room_Channel_GameRule_101_221_Field_Evidence.md) | [`Core/Room_Lobby_GameRule.md`](Core/Room_Lobby_GameRule.md)、[`Core/Room_Settings_Packets.md`](Core/Room_Settings_Packets.md) |
+| Channel／Lobby／Room／Player／Map／GameRule 生命週期 | [`Core/Room_Lobby_GameRule.md`](Core/Room_Lobby_GameRule.md) | `101–221` Field Evidence |
 | Mode／Rule／Selector value | [`Core/Mode_Rules_And_Options.md`](Core/Mode_Rules_And_Options.md) | [`Core/Server_State_Model.md`](Core/Server_State_Model.md) |
 | Combat／Hit／Damage | [`Core/Combat_Damage.md`](Core/Combat_Damage.md) | 回 [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) 看 `165` 建包上下文 |
 | UDP Movement | [`Core/UDP_Move_Inf_DeepEvidence.md`](Core/UDP_Move_Inf_DeepEvidence.md) | 回 [`Core/Network_Protocol.md`](Core/Network_Protocol.md) 看 transport |
-| Result／Score／K-D／Quest／Event | [`Core/Result_Quest_Stats.md`](Core/Result_Quest_Stats.md) | [`Core/TCP_269_Subtype7_Field_Detail.md`](Core/TCP_269_Subtype7_Field_Detail.md) |
+| Result／Score／K-D／Quest／Event | [`Core/Result_Quest_Stats.md`](Core/Result_Quest_Stats.md) | 內含 `269 subtype 7` 證據 |
 | Resource pack／loader／runtime | [`Core/Resource_Pack_Model.md`](Core/Resource_Pack_Model.md) | 回使用該 Resource 的主文件 |
-| 武器丟棄／拾取 | [`Core/DropWeapon_Protocol.md`](Core/DropWeapon_Protocol.md) | 回 [`Core/Gameplay_Network.md`](Core/Gameplay_Network.md) 看 gameplay context |
 | 跨子系統 Server state abstraction | [`Core/Server_State_Model.md`](Core/Server_State_Model.md) | 再回各領域主文件取得 packet truth |
 | Kick Vote | [`KickVote/README.md`](KickVote/README.md) | [`KickVote/Research.md`](KickVote/Research.md) |
 
@@ -71,27 +73,24 @@
 | 文件 | 唯一責任 |
 |---|---|
 | [Core/Room_Lobby_GameRule.md](Core/Room_Lobby_GameRule.md) | Channel → Lobby → Room、16-slot Player、Team/Group、Map、Room 與 GameRule 的高階生命週期與關係 |
-| [Core/Room_Channel_GameRule_101_192_Field_Evidence.md](Core/Room_Channel_GameRule_101_192_Field_Evidence.md) | `101–192` 精確 packet、parser、serializer、欄位證據 |
-| [Core/Channel_Lobby_193_221_Field_Evidence.md](Core/Channel_Lobby_193_221_Field_Evidence.md) | `193–221` 精確 packet、parser、serializer、欄位證據 |
+| [Core/Room_Channel_GameRule_101_221_Field_Evidence.md](Core/Room_Channel_GameRule_101_221_Field_Evidence.md) | `101–221` 精確 packet、parser、serializer、欄位與直接資料流證據 |
 | [Core/Room_Settings_Packets.md](Core/Room_Settings_Packets.md) | Room selector/value、設定 packet 與 UI data-flow |
 | [Core/Server_State_Model.md](Core/Server_State_Model.md) | 跨子系統 Server abstraction；不重新定義 Packet／Field truth |
 
-## 五、Mode、Gameplay、Combat、Movement、武器事件
+## 五、Mode、Gameplay、Combat、Movement
 
 | 文件 | 唯一責任 |
 |---|---|
 | [Core/Mode_Rules_And_Options.md](Core/Mode_Rules_And_Options.md) | ModeId、OptionIndex、OptionValue、模式規則、selector values、版本差異 |
-| [Core/Gameplay_Network.md](Core/Gameplay_Network.md) | `165/166 Y_TCP_INF` gameplay event family、166 subtype、Resource/state application |
+| [Core/Gameplay_Network.md](Core/Gameplay_Network.md) | `165/166 Y_TCP_INF` gameplay event family、166 subtype、Resource/state application，以及 `960–963` 武器丟棄／拾取 protocol |
 | [Core/Combat_Damage.md](Core/Combat_Damage.md) | Hit Detection、combat geometry、damage modifier、`165` 建包前計算 |
 | [Core/UDP_Move_Inf_DeepEvidence.md](Core/UDP_Move_Inf_DeepEvidence.md) | UDP `8/24`、queue、27-byte actor record、movement/state fields |
-| [Core/DropWeapon_Protocol.md](Core/DropWeapon_Protocol.md) | 丟棄／拾取武器的 packet 與流程 |
 
 ## 六、Result、Score、Quest、Event、Resource
 
 | 文件 | 唯一責任 |
 |---|---|
-| [Core/Result_Quest_Stats.md](Core/Result_Quest_Stats.md) | Result、Score/K-D、長期統計、Quest condition、Assist／Football 等事件的主線真相 |
-| [Core/TCP_269_Subtype7_Field_Detail.md](Core/TCP_269_Subtype7_Field_Detail.md) | `269 subtype 7` 精確欄位、玩家同步與 Result/K-D state detail |
+| [Core/Result_Quest_Stats.md](Core/Result_Quest_Stats.md) | Result、Score/K-D、長期統計、Quest condition、Assist／Football 等事件的主線真相；含 `269 subtype 7` 詳細欄位 |
 | [Core/Resource_Pack_Model.md](Core/Resource_Pack_Model.md) | Resource pack、資料模型與 loader/runtime boundary |
 
 ## 七、Kick Vote
@@ -106,21 +105,21 @@
 ### `Packet` 問題
 
 ```text
-先找 Opcode 主題主文件
+先找 Opcode 所屬的主題／封包文件
     ↓
-再找對應 Field Evidence / Schema / Detail
+需要 byte layout → Field Evidence / Schema
     ↓
-最後回 Network_Protocol 確認 transport/frame
+需要 transport → Network_Protocol
 ```
 
 ### `State` 問題
 
 ```text
-先找擁有該 state 的領域主文件
+先找真正擁有該 state 的領域主文件
     ↓
 確認誰寫入、誰讀取、何時變更
     ↓
-需要跨領域時再看 Server_State_Model
+只有跨領域時才看 Server_State_Model
 ```
 
 ### `Resource` 問題
@@ -130,7 +129,7 @@
     ↓
 讀該功能的 semantic context
     ↓
-需要 loader／pack 細節時再看 Resource_Pack_Model
+需要 loader／pack → Resource_Pack_Model
 ```
 
 ### `C# Server` 問題
@@ -139,10 +138,10 @@
 不要從 Server_State_Model 反推 Packet
 
 Packet truth
-    → 對應 Protocol / Schema / Field Evidence
+    → Protocol / Schema / Field Evidence
 
 Domain truth
-    → 對應主題 Core 文件
+    → 對應主題主文件
 
 Server abstraction
     → Server_State_Model
@@ -150,7 +149,7 @@ Server abstraction
 
 ## 九、已整合的舊文件
 
-以下名稱只保留在這裡作為**歷史追溯紀錄**；它們不再是閱讀入口，也不應重新建立：
+以下名稱只保留作歷史追溯；它們不是閱讀入口，也不應重新建立：
 
 ```text
 Foundation_TCP_Handshake_Login_Protocol.md
@@ -179,7 +178,15 @@ Packet_166_Field_Map.md
 
 Result_Stat_Protocol_223_245_381_389.md
 Quest_Event_ID_Mapping.md
+TCP_269_Subtype7_Field_Detail.md
     → Core/Result_Quest_Stats.md
+
+DropWeapon_Protocol.md
+    → Core/Gameplay_Network.md
+
+Room_Channel_GameRule_101_192_Field_Evidence.md
+Channel_Lobby_193_221_Field_Evidence.md
+    → Core/Room_Channel_GameRule_101_221_Field_Evidence.md
 
 KickVote/Protocol.md
 KickVote/UI_State.md
@@ -188,7 +195,7 @@ KickVote/Master_Room.md
     → KickVote/Research.md
 ```
 
-這些名稱的存在只用來回答「以前的研究內容現在去哪裡」，不是要求讀者再次閱讀多份舊摘要。
+這些名稱的存在只用來回答「以前的研究內容現在去哪裡」，不是要求讀者重新閱讀多份舊摘要。
 
 ## 十、整理硬規則
 
