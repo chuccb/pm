@@ -29,7 +29,7 @@ packed_flags
 
 ## 2. Server 的核心邊界
 
-目前最小可行的抽象是：
+目前最小可行抽象：
 
 ```text
 GameServer
@@ -38,7 +38,7 @@ GameServer
 └─ MatchRuntime[]
 ```
 
-其中三者責任不同：
+三者責任不同：
 
 ```text
 Session
@@ -65,18 +65,18 @@ Session
 └─ ConnectionState
 ```
 
-目前 Client evidence 明確要求 Server 另外保存 `PlayerId` 與 `SlotIndex`：
+Client evidence 明確要求 Server 另外保存：
 
 ```text
 PlayerId ≠ SlotIndex
 ```
 
-相關證據：
+相關跨層證據入口：
 
 ```text
-Player_Slot_Team.md
-Network_Dispatch.md
-Y_TCP_INF_Damage.md
+Room_Lobby_GameRule.md
+Network_Protocol.md
+Gameplay_Network.md
 ```
 
 ## 4. Room
@@ -96,7 +96,7 @@ Room
 └─ RoomPhase
 ```
 
-其中 selector 必須保留兩層：
+selector 必須保留兩層：
 
 ```text
 OptionIndex
@@ -105,11 +105,11 @@ OptionValue
 
 不能只保存 UI index。
 
-完整 selector 與 Room 設定證據：
+完整 evidence：
 
 ```text
+Room_Lobby_GameRule.md
 Room_Settings_Packets.md
-Map_And_Room.md
 Room_Channel_GameRule_101_192_Field_Evidence.md
 ```
 
@@ -136,10 +136,10 @@ PlayerSlot
 
 `TeamId`、`GroupId` 與其它 relation-like state 目前不要過早合併成單一欄位。
 
-詳細 slot/team 證據：
+詳細研究入口：
 
 ```text
-Player_Slot_Team.md
+Room_Lobby_GameRule.md
 ```
 
 ## 6. Room → Match 的生命週期
@@ -164,14 +164,15 @@ MATCH_ENDING
 POST_MATCH / ROOM
 ```
 
-這裡只保存跨文件 state graph；詳細 Ready、Start、Loading、End、Leave 因果統一由：
+跨層 graph 由：
 
 ```text
-Channel_Lobby_Lifecycle.md
-GameRule_Lifecycle.md
+Room_Lobby_GameRule.md
+Gameplay_Network.md
+Result_Quest_Stats.md
 ```
 
-維護。
+共同支撐。
 
 ## 7. MatchRuntime
 
@@ -193,11 +194,11 @@ MatchRuntime
 └─ ResultState
 ```
 
-其中 `RoundIndex` 與 `ElapsedTime` 必須是可分離欄位：不同模式的 Client UI 與 GameRule 行為同時存在時間型與回合型進度。
+`RoundIndex` 與 `ElapsedTime` 必須是可分離欄位：不同模式的 Client UI 與 GameRule 行為同時存在時間型與回合型進度。
 
 ## 8. Score / Result 分層
 
-目前至少應分開三個 Client data layer：
+至少分開三個 Client data layer：
 
 ```text
 Live round / mode-local
@@ -212,12 +213,12 @@ Local result-screen My K/D
 
 因此 Server model 不應建立單一 `KillDeath` 欄位並讓所有 packet 直接共用。
 
-詳細證據：
+詳細 evidence：
 
 ```text
-Gameplay_166_DeepEvidence.md
+Gameplay_Network.md
 TCP_269_Subtype7_Field_Detail.md
-Result_Stat_Protocol_223_245_381_389.md
+Result_Quest_Stats.md
 ```
 
 ## 9. Economy / Profile state
@@ -239,7 +240,7 @@ ArgList → CASH
 EE8D1C → CP / COUPON UI
 ```
 
-而 205/207 等 ClientData／collection synchronization 也會同步其中部分值。
+205/207 等 ClientData／collection synchronization 也會同步其中部分值。
 
 詳細欄位證據：
 
@@ -274,11 +275,12 @@ Primary / Secondary / Melee / Throw
 ```text
 Character_Inventory_Equipment.md
 MyInfo_198_ClientData_Field_Schema.md
+ClientData_Shared_Decoder_Field_Evidence.md
 ```
 
 ## 11. Network boundary
 
-目前 Server 必須至少維持三個獨立 network families：
+Server 至少維持三個獨立 network families：
 
 ```text
 TCP GameRule / Room control
@@ -296,14 +298,14 @@ queueing
 state application
 ```
 
-不可因為最終都修改 `PlayerSlot` 就共用同一 packet abstraction。
+不可因最終都修改 `PlayerSlot` 就共用同一 packet abstraction。
 
 詳細資料：
 
 ```text
 Room_Channel_GameRule_101_192_Field_Evidence.md
-Y_TCP_INF_Damage.md
-Y_TCP_INF_Transport.md
+Gameplay_Network.md
+Network_Protocol.md
 UDP_Move_Inf_DeepEvidence.md
 ```
 
@@ -334,11 +336,17 @@ Normal damage
 Mine/Bomb damage
 ```
 
-詳細欄位與 sender data-flow 只由 `Y_TCP_INF_Damage.md` 維護。
+完整 165/166 事件、parser、sender 與 state evidence 由：
+
+```text
+Gameplay_Network.md
+```
+
+維護。
 
 ## 13. Room settings → MatchRuntime
 
-Room configuration 的基本資料流為：
+基本資料流：
 
 ```text
 UI selector state
@@ -377,19 +385,19 @@ Spawn rule
 Team aggregation
 ```
 
-必須是 `ModeRule` 的責任，而不是塞入通用 Room parser。
+必須是 mode-specific rule 的責任，而不是塞入通用 Room parser。
 
 對應研究：
 
 ```text
-Mode_Rules.md
-Mode_Option_Tables.md
-GameRule_Lifecycle.md
+Mode_Rules_And_Options.md
+Room_Lobby_GameRule.md
+Gameplay_Network.md
 ```
 
 ## 15. Evidence → Server contract 的升級規則
 
-當新的 Client / Resource / Wiki 證據出現時，依序：
+當新的 Client / Resource / Wiki 證據出現時：
 
 ```text
 1. 更新對應 packet / field 主文件
