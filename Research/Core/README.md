@@ -60,40 +60,40 @@ Extracted 資源
 
 ### 網路與封包基礎
 
-- [`Foundation_TCP_Handshake_Login_Protocol.md`](Foundation_TCP_Handshake_Login_Protocol.md)：TCP、握手、登入與基礎協定。
+- [`Foundation_TCP_Handshake_Login_Protocol.md`](Foundation_TCP_Handshake_Login_Protocol.md)：TCP frame、完整性/XOR transform 與共用 fixed-width codec。
 - [`Network_Dispatch.md`](Network_Dispatch.md)：封包註冊、接收 Dispatcher 與 handler 路由。
-- [`Y_TCP_INF_Transport.md`](Y_TCP_INF_Transport.md)：`Y_TCP_INF` 傳輸層資料流。
-- [`ClientData_Shared_Decoder_Field_Evidence.md`](ClientData_Shared_Decoder_Field_Evidence.md)：共用 decoder 與欄位讀取證據。
+- [`Y_TCP_INF_Transport.md`](Y_TCP_INF_Transport.md)：`Y_TCP_INF` submission／transport 邊界。
+- [`ClientData_Shared_Decoder_Field_Evidence.md`](ClientData_Shared_Decoder_Field_Evidence.md)：共用 ClientData wire family 與欄位讀寫證據。
 
 ### 登入、玩家與房間前置狀態
 
-- [`Login_Adjacent_680_696_Field_Schema.md`](Login_Adjacent_680_696_Field_Schema.md)：`680–696` 與 `681` server-list／登入鏈完整結構。
-- [`MyInfo_198_ClientData_Field_Schema.md`](MyInfo_198_ClientData_Field_Schema.md)：`198` composite ClientData 完整結構。
+- [`Login_Adjacent_680_696_Field_Schema.md`](Login_Adjacent_680_696_Field_Schema.md)：`680–696` 登入鄰近協定與 `681` server-list 結構。
+- [`MyInfo_198_ClientData_Field_Schema.md`](MyInfo_198_ClientData_Field_Schema.md)：`198` top-level composite 順序、MyInfo／Avatar hydration 與未閉合欄位。
 - [`Player_Slot_Team.md`](Player_Slot_Team.md)：Player slot、Team、玩家位置與隊伍狀態。
-- [`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md)：Character、Inventory、Equipment、Weapon 與 Resource 關係。
+- [`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md)：Character、Inventory、Equipment、Weapon 與 Runtime 語意。
 - [`Currency_State_Field_Evidence.md`](Currency_State_Field_Evidence.md)：貨幣與玩家狀態欄位證據。
 
 ### Channel、Lobby、Room、Map、GameRule
 
-- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` Channel/Lobby 欄位直接證據。
+- [`Channel_Lobby_193_221_Field_Evidence.md`](Channel_Lobby_193_221_Field_Evidence.md)：`193–221` top-level packet 欄位直接證據。
 - [`Channel_Lobby_Lifecycle.md`](Channel_Lobby_Lifecycle.md)：Channel/Lobby 生命週期與狀態轉移。
 - [`Room_Channel_GameRule_101_192_Field_Evidence.md`](Room_Channel_GameRule_101_192_Field_Evidence.md)：`101–192` Room/Channel/GameRule 欄位證據。
 - [`Room_Settings_Packets.md`](Room_Settings_Packets.md)：房間設定與相關封包。
-- [`Map_And_Room.md`](Map_And_Room.md)：Map、Room 以及兩者的關係。
+- [`Map_And_Room.md`](Map_And_Room.md)：Map 專題入口與 Map/Room 關係。
 - [`GameRule_Lifecycle.md`](GameRule_Lifecycle.md)：GameRule 生命週期與狀態機。
 - [`Server_State_Model.md`](Server_State_Model.md)：Server-side 狀態模型與同步關係。
 
 ### 遊戲模式與 Gameplay
 
-- [`Mode_Rules.md`](Mode_Rules.md)：各遊戲模式的規則與狀態。
-- [`Mode_Option_Tables.md`](Mode_Option_Tables.md)：模式選項與欄位對照表。
+- [`Mode_Rules.md`](Mode_Rules.md)：各遊戲模式的規則、版本差異與 Runtime 待閉合項目。
+- [`Mode_Option_Tables.md`](Mode_Option_Tables.md)：模式選項 selector index/value 的唯一主文件。
 - [`Gameplay_166_DeepEvidence.md`](Gameplay_166_DeepEvidence.md)：`166` Gameplay、死亡、K/D、結果、欄位與跨函式證據。
 
 ### 戰鬥、移動、武器與 Y_TCP_INF
 
 - [`Combat_Hit_Detection.md`](Combat_Hit_Detection.md)：命中判定與戰鬥事件。
 - [`Damage_Calculation.md`](Damage_Calculation.md)：傷害計算與相關狀態。
-- [`Y_TCP_INF_Damage.md`](Y_TCP_INF_Damage.md)：`Y_TCP_INF` 165/166 全 family、handler 與 state 證據。
+- [`Y_TCP_INF_Damage.md`](Y_TCP_INF_Damage.md)：`Y_TCP_INF` 165/166 family、handler 與 state 證據。
 - [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md)：UDP 8/24、Queue、27-byte actor record 與欄位證據。
 - [`DropWeapon_Protocol.md`](DropWeapon_Protocol.md)：丟棄武器封包與流程。
 
