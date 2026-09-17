@@ -1,7 +1,7 @@
 # PaperMan 研究文件完整索引
 
 > 目標版本：日本版 PaperMan 2016 年服務終了時的最終 Client。
-> 更新基準：2026-09-17。
+> 更新基準：2026-09-18。
 > 本索引回答一件事：**我要找什麼，第一站去哪裡。**
 
 ## 最短閱讀路徑
@@ -22,7 +22,8 @@ Research/README.md
 
 | 問題 | 第一入口 |
 |---|---|
-| TCP/UDP、frame、XOR、checksum、dispatcher、UDP movement | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) |
+| TCP/UDP、frame、XOR、checksum、核心 dispatcher、UDP movement | [`Core/Network_Protocol.md`](Core/Network_Protocol.md) |
+| TCP dispatcher 完整 opcode → handler、UDP peer/bootstrap、movement/action identity 交叉證據 | [`Core/Network_Dispatcher_Inventory.md`](Core/Network_Dispatcher_Inventory.md) |
 | Login、Server List、`680–696`、MyInfo、`197–221` ClientData | [`Core/Login_ClientData_Protocol.md`](Core/Login_ClientData_Protocol.md) |
 | Character、Appearance、Inventory、Weapon、PG/CASH/CP | [`Core/Character_Inventory_Equipment.md`](Core/Character_Inventory_Equipment.md) |
 | Channel、Lobby、Room、Player、Map、Mode、GameRule、selector | [`Core/Room_GameRule_Mode.md`](Core/Room_GameRule_Mode.md) |
@@ -38,7 +39,8 @@ Research/README.md
 | 文件 | 唯一責任 |
 |---|---|
 | [Core/README.md](Core/README.md) | Core 導航與閱讀規則 |
-| [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、codec、integrity/XOR、checksum、dispatcher、UDP movement |
+| [Core/Network_Protocol.md](Core/Network_Protocol.md) | TCP/UDP transport、frame、codec、integrity/XOR、checksum、核心 dispatcher、UDP movement |
+| [Core/Network_Dispatcher_Inventory.md](Core/Network_Dispatcher_Inventory.md) | `sub_58B010` 完整 TCP opcode → handler inventory、UDP peer/bootstrap、movement/action identity 跨函式證據 |
 | [Core/Login_ClientData_Protocol.md](Core/Login_ClientData_Protocol.md) | `680–696` + `197–221` login / MyInfo / ClientData wire protocol |
 | [Core/Character_Inventory_Equipment.md](Core/Character_Inventory_Equipment.md) | Character、Appearance、Inventory、Weapon Loadout、Economy runtime/domain model |
 | [Core/Room_GameRule_Mode.md](Core/Room_GameRule_Mode.md) | Channel/Lobby/Room、Player/Slot/Team、Map、selector、Mode、GameRule lifecycle/rules |
@@ -65,6 +67,7 @@ Research/README.md
 需要 bytes → 該入口文件的 wire/schema section
   ↓
 需要 transport → Network_Protocol
+需要完整 dispatcher / peer evidence → Network_Dispatcher_Inventory
 ```
 
 ### State
