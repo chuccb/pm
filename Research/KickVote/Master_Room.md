@@ -1,7 +1,8 @@
 # `PM_KICKUSER_REQ/ACK` Master／房間層研究
 
-> 研究日期：2026-09-16
-> 目標版本：日本版 PaperMan 2016 年服務終了時 Client
+> 研究日期：2026-09-17
+> 目標版本：日本版 PaperMan 2016 年服務終了時的最終 Client。
+> 文件角色：131/132 GameRoom force-out 與 396/397 Master／Room kick protocol 的主文件；718–723 投票協定由 `Protocol.md` 維護，投票資格與 UI 狀態由 Kick Vote 其他主文件維護。
 
 ## 一、先分清三條不同的「踢人」協定層
 
@@ -18,7 +19,7 @@
     = Master／Room protocol family 的 kick-user 操作
 ```
 
-不能因為三者都與「kick」相關，就直接假設它們是同一 packet chain。
+不能因為三者都與「kick」相關，就直接假設它們是同一 packet chain。[C]
 
 ## 二、131 `GR_FORCEOUT_REQ` 已確認為實際 Client sender
 
@@ -37,7 +38,7 @@ sub_555090(&dword_1321D00, v2);
 131 payload = 1 byte
 ```
 
-`n0x10` 在呼叫前會先由 room logic 根據 `dword_F6DCF4[slot]` 尋找目標玩家；`CLobbyGameRoom::sub_432270()` 與 `CLobbyTournamentGameRoom::sub_479190()` 都直接包裝 `sub_56EC10()`。
+`n0x10` 在呼叫前會先由 room logic 根據 `dword_F6DCF4[slot]` 尋找目標玩家；`CLobbyGameRoom::sub_432270()` 與 `CLobbyTournamentGameRoom::sub_479190()` 都直接包裝 `sub_56EC10()`。[C]
 
 一般 `CLobbyGameRoom` caller `sub_42F700(target_player_id)` 在：
 
@@ -46,16 +47,16 @@ sub_555090(&dword_1321D00, v2);
 且該 slot 的狀態符合 forceout path (`byte_F6D9EC[slot] == 9`)
 ```
 
-時發送 131。
+時發送 131。[C]
 
-因此目前高 confidence 語意為：
+因此目前高信度語意為：
 
 ```text
 131 GR_FORCEOUT_REQ
 +0x00 u8 target_slot / forceout slot
 ```
 
-它不是 `player_id` DWORD；Client 先把 player identity 映射成 0..15 slot，再只序列化該 slot。
+它不是 `player_id` DWORD；Client 先把 player identity 映射成 0..15 slot，再只序列化該 slot。[C]
 
 ## 三、132 `GR_FORCEOUT_ACK` 不只是「ACK」；存在明確的房間 slot mutation
 
@@ -91,7 +92,7 @@ sub_479A50(dword_EA0F30, n0x10, 0, 1);
 sub_6FC460(v10);                  // remove/reset user-slot object
 ```
 
-且在特定條件下重設相關 UI/selection state。
+且在特定條件下重設相關 UI/selection state。[C]
 
 所以：
 
@@ -101,9 +102,9 @@ sub_6FC460(v10);                  // remove/reset user-slot object
     -> 從 room user-slot collection 做實際 client-side removal/reset
 ```
 
-這是目前比單純函式名稱更強的直接證據：**132 的某個非零狀態確實能驅動房間 slot mutation。**
+這是比單純函式名稱更強的直接證據：**132 的某個非零狀態確實能驅動房間 slot mutation。**[C]
 
-但 `v12=1/2/...` 的產品層 status enum 尚未命名；不能直接說 `1=KICK_SUCCESS`，除非再找到 server/ACK 對應。
+但 `v12=1/2/...` 的產品層 status enum 尚未命名；不能直接說 `1=KICK_SUCCESS`，除非再找到 server／ACK 對應。[OPEN]
 
 ## 四、132 status=0 是另一種同步路徑
 
@@ -120,7 +121,7 @@ byte_F6DCF4[slot]  // player identity mapping
 room/tournament state
 ```
 
-其中大量資料屬於完整 room/player state synchronization。
+其中大量資料屬於完整 room/player state synchronization。[C]
 
 因此 132 至少包含兩種高階形態：
 
@@ -158,7 +159,7 @@ case 397u:
 397 payload = u8 status
 ```
 
-396 的 request body 在目前完整 `PaperMan.exe.c` 中仍未找到直接 `Packet ctor(...,396)` serializer/caller。
+396 的 request body 在目前完整 `PaperMan.exe.c` 中仍未找到直接 `Packet ctor(...,396)` serializer/caller。[C][OPEN]
 
 一個重要負面證據是：即使同一 Client 有明確的：
 
@@ -174,12 +175,12 @@ sub_579350(...)
 但目前未發現對應的 396 constructor。這可能代表：
 
 ```text
-396 是間接/虛擬 dispatch 建立
+396 是間接／virtual dispatch 建立
 或特定功能在此 Client build 中沒有普通 UI caller
 或該 opcode 主要由另一端使用
 ```
 
-在證據不足前不猜。
+在證據不足前不猜。[OPEN]
 
 ## 六、718–723 與 131/132 的關係目前仍未閉合
 
@@ -224,9 +225,9 @@ Packet 131
 723 success -> 396
 ```
 
-更合理的目前模型是：**投票結果與實際 room removal 可能由 Server 在不同 packet/lifecycle 路徑通知 Client；Client 對收到的 removal/sync packet 再執行 slot mutation。**
+更合理的目前模型是：**投票結果與實際 room removal 可能由 Server 在不同 packet/lifecycle 路徑通知 Client；Client 對收到的 removal/sync packet 再執行 slot mutation。**[OPEN]
 
-這一點仍需要 server-side traffic 或更多 client-side xref/vtable evidence 最終封閉。
+這一點仍需要 Server-side traffic 或更多 client-side xref／vtable evidence 最終閉合。
 
 ## 七、後續追查優先級
 
