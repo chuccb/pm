@@ -13,7 +13,7 @@
 → Network_Protocol.md
 
 我想知道 Packet 的 bytes
-→ 對應 Field Evidence / Schema
+→ 對應 Field Evidence / Schema / Protocol
 
 我想知道 bytes 在遊戲中代表什麼
 → 對應 Domain 主文件
@@ -36,8 +36,6 @@ Server abstraction
 C# implementation
 ```
 
-上層 abstraction 不得反向補出下層不存在的證據。
-
 ## 2. 整體脈絡
 
 ```text
@@ -49,25 +47,14 @@ Room / Player / Slot / Team
   ↓
 GameRule / Mode / Room Settings
   ↓
-Gameplay
+Gameplay / Combat
   ├─ TCP 165/166
   ├─ TCP 960–963
-  ├─ UDP Movement
-  └─ Combat / Damage
+  └─ UDP Movement
   ↓
 Result / Score / Quest
   ↓
 PlayerData / Resource
-```
-
-研究證據固定交叉：
-
-```text
-IDA C / LST
-    ↕
-Extracted/
-    ↕
-日本 PaperMan Wiki
 ```
 
 ## 3. 問題 → 第一入口
@@ -75,16 +62,14 @@ Extracted/
 | 問題 | 第一入口 | 深入資料 |
 |---|---|---|
 | TCP/UDP frame、XOR、checksum、Dispatcher | [`Network_Protocol.md`](Network_Protocol.md) | [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md) |
-| `165/166` gameplay | [`Gameplay_Network.md`](Gameplay_Network.md) | [`Combat_Damage.md`](Combat_Damage.md)、[`Result_Quest_Stats.md`](Result_Quest_Stats.md) |
-| `960–963` dropped weapon／pickup | [`Gameplay_Network.md`](Gameplay_Network.md) | 該文件 `960–963` 章節 |
+| `165/166`、Hit、Damage、960–963 | [`Gameplay_Combat.md`](Gameplay_Combat.md) | [`Result_Quest_Stats.md`](Result_Quest_Stats.md) |
+| UDP Movement | [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md) | [`Network_Protocol.md`](Network_Protocol.md) |
 | Login／Server List／`680–696` | [`Login_Adjacent_680_696_Field_Schema.md`](Login_Adjacent_680_696_Field_Schema.md) | [`ClientData_Protocol.md`](ClientData_Protocol.md) |
 | `198/200/203/218/220/221` wire layout | [`ClientData_Protocol.md`](ClientData_Protocol.md) | [`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md) |
 | Character／Appearance／Inventory／Weapon／PG／CASH／CP | [`Character_Inventory_Equipment.md`](Character_Inventory_Equipment.md) | [`ClientData_Protocol.md`](ClientData_Protocol.md) |
-| `101–221` Room／Channel／GameRule packet bytes | [`Room_Channel_GameRule_101_221_Field_Evidence.md`](Room_Channel_GameRule_101_221_Field_Evidence.md) | [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md) |
-| Channel／Lobby／Room／Player／Map／GameRule lifecycle | [`Room_Lobby_GameRule.md`](Room_Lobby_GameRule.md) | `101–221` Field Evidence、[`Room_Settings_Packets.md`](Room_Settings_Packets.md) |
-| Mode／Rule／Selector values | [`Mode_Rules_And_Options.md`](Mode_Rules_And_Options.md) | [`Server_State_Model.md`](Server_State_Model.md) |
-| Combat／Hit／Damage | [`Combat_Damage.md`](Combat_Damage.md) | [`Gameplay_Network.md`](Gameplay_Network.md) |
-| UDP Movement | [`UDP_Move_Inf_DeepEvidence.md`](UDP_Move_Inf_DeepEvidence.md) | [`Network_Protocol.md`](Network_Protocol.md) |
+| `101–221` Room／Channel／GameRule packet bytes | [`Room_Channel_GameRule_101_221_Field_Evidence.md`](Room_Channel_GameRule_101_221_Field_Evidence.md) | [`Room_GameRule_Mode.md`](Room_GameRule_Mode.md) |
+| Channel／Lobby／Room／Player／Map／GameRule／Mode lifecycle | [`Room_GameRule_Mode.md`](Room_GameRule_Mode.md) | `101–221` Field Evidence |
+| Mode／Rule／Selector value | [`Room_GameRule_Mode.md`](Room_GameRule_Mode.md) | [`Server_State_Model.md`](Server_State_Model.md) |
 | Result／Score／K-D／Quest／Event／269 subtype 7 | [`Result_Quest_Stats.md`](Result_Quest_Stats.md) | 該文件 `269 subtype 7` 章節 |
 | Resource pack／loader | [`Resource_Pack_Model.md`](Resource_Pack_Model.md) | 使用該 Resource 的主文件 |
 | 跨子系統 Server model | [`Server_State_Model.md`](Server_State_Model.md) | 再回各領域主文件 |
@@ -97,7 +82,7 @@ Network_Protocol
     = transport / frame / transform / dispatcher
 
 Login_Adjacent_680_696_Field_Schema
-    = 680–696 login-adjacent packet
+    = 680–696 login/account-adjacent wire schema
 
 ClientData_Protocol
     = 198 + 200/203/218/220/221 ClientData wire families
@@ -105,23 +90,14 @@ ClientData_Protocol
 Character_Inventory_Equipment
     = Character / Inventory / Weapon / Economy runtime model
 
-Room_Lobby_GameRule
-    = Room / Player / Map / GameRule lifecycle
+Room_GameRule_Mode
+    = Room / Player / Map / selector / mode / GameRule lifecycle
 
 Room_Channel_GameRule_101_221_Field_Evidence
     = 101–221 exact packet wire evidence
 
-Room_Settings_Packets
-    = selector / setting data-flow
-
-Mode_Rules_And_Options
-    = mode rule / selector value semantics
-
-Gameplay_Network
-    = 165/166 + 960–963 gameplay event families
-
-Combat_Damage
-    = hit / geometry / damage calculation
+Gameplay_Combat
+    = Hit / Damage → 165/166 → 960–963 gameplay events
 
 UDP_Move_Inf_DeepEvidence
     = UDP movement / actor record
@@ -136,16 +112,15 @@ Server_State_Model
     = cross-domain server abstraction only
 ```
 
-## 5. 核心單一真相規則
+## 5. 單一真相
 
 ```text
 同一 Packet → 一份主要 wire truth
 同一 State  → 一份主要 semantic truth
+同一 Domain → 一份主要 model truth
 Server abstraction → 不產生第二份 Packet truth
 未知欄位 → [OPEN]
 ```
-
-不能因為 Server 需要編譯而把未知欄位改成 `0`、固定常數或 guessed enum。
 
 ## 6. 新證據放哪裡？
 
@@ -154,11 +129,11 @@ Server abstraction → 不產生第二份 Packet truth
     ├─ 是 → 更新該文件
     └─ 否
         ↓
-只是既有 packet / field / function evidence？
-    ├─ 是 → 放對應 Field Evidence / Schema / Detail
+是既有 packet / field / function evidence？
+    ├─ 是 → 放對應主題文件；不要新增摘要副本
     └─ 否
         ↓
-跨子系統 abstraction？
+是跨子系統 abstraction？
     ├─ 是 → Server_State_Model
     └─ 否 → 先檢查 DOCUMENT_INDEX 與 AGENTS.md
 ```
