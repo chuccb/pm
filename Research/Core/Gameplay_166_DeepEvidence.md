@@ -3,7 +3,7 @@
 > 研究目標：日本版 PaperMan 2016 年服務終了時的最終 Client。
 > 更新基準：2026-09-17。
 >
-> 本文件是 `166` Gameplay／結果／死亡／移動事件的深入證據主文件。`Packet_166_Field_Map.md` 負責欄位總表；本文件負責跨函式、跨狀態、跨資源的證據鏈。原本的 `Gameplay_166_KD_Field_Evidence.md` 已整合至本文件，不再維護第二份同主題結果欄位真相。
+> 本文件是 `166` Gameplay／結果／死亡／移動事件的深入證據主文件。`Packet_166_Field_Map.md` 只負責快速欄位索引；本文件負責完整 parser、reader width、state mutation、Resource、K/D 與跨函式證據。原本分散的 `Gameplay_166_KD_Field_Evidence.md` 與 `Packet_166_Field_Detail_3_15.md` 已整合至本文件，不再維護第二份完整 semantic 真相。
 
 ## 1. `166` 是多型 Gameplay Event Family
 
@@ -22,32 +22,49 @@ TCP ClientSocket
 
 `sub_749B90` 開頭依序讀取 `u8 n16` 與 `u8 n18`，其中 `n18` 直接進第二級 switch。因此 166 是多種 gameplay event 共用的 multiplexed family，不是一個固定結構的死亡封包。[C]
 
-## 2. subtype 2／16 的 Participant 結構
+## 2. Reader Width 基線
 
-`sub_7463E0()` 共用於：
-
-```text
-subtype 2  → a4 = 0
-subtype 16 → a4 = 1
-```
-
-除外層 actor ID 外，payload 還讀取第二個 player-like ID `n16_2`，並建立兩個玩家映射：
+目前直接對應的 reader helper：
 
 ```text
-n16_1 → sub_67D7D0() → participant A
-n16_2 → sub_67D7D0() → participant B
+sub_592940 = u8
+sub_5929C0 = u16
+sub_592A00 = u16
+sub_592A40 = u32
+sub_592AC0 = u32
+sub_592B40 = 4-byte copy／reader family
+sub_592730 = variable／opaque data reader
 ```
 
-後續 local-player branch 對 `n16_1 == localPlayer` 與 `n16_2 == localPlayer` 採取不同處理，因此兩個 ID 不是重複欄位，而是事件中的兩個不同 participant。[C]
+所有後續 subtype footprint 都依實際 helper 呼叫判定，不依 Hex-Rays 表面 prototype。[C]
 
-## 3. subtype 2／16 的可直接觀察欄位
+## 3. subtype 1
 
-`sub_7463E0()` 在 state mutation 前讀取：
+`sub_746360()` 讀：
+
+```text
+u8 target_id
+```
+
+然後：
+
+```text
+sub_67DF00(target_id)
+→ player object/controller
+→ remote actor 時 sub_5B8EE0(controller)
+→ sub_5B8F70(controller)
+```
+
+目前可確認是 Server event → actor controller state/reset callback；公開事件名稱仍 `[OPEN]`。[C]
+
+## 4. subtype 2／16：Participant Event
+
+### 4.1 Wire payload
 
 ```text
 u32 v94
-u8  n16_2
-u16 v90[0]
+u8  participant_B
+u16 resource_id
 u8  n2
 u8  n10
 u8  n10_1
@@ -56,26 +73,78 @@ u32 v95
 u8  v86
 ```
 
-目前可直接確認：
+Body footprint：
 
 ```text
-v89    → local player object +164
-v95    → local player object +172
-v90[0] → resource lookup / event effect
-n2     → downstream effect/result branch selector
+4 + 1 + 2 + 1 + 1 + 1 + 4 + 4 + 1 = 19 bytes
 ```
 
-`v94` 會與 `dword_F2A65C` 比較，但目前不能把它直接命名為時間、sequence 或 result code。[C][OPEN]
+外層另有：
 
-## 4. 最強的死亡／狀態轉移證據
-
-對 remote target 分支，當 player object/controller 存在且 `sub_9BC1A0` 不成立時，會呼叫：
-
-```c
-sub_9BC470(v77, 1, timeLike, 0, 0);
+```text
+u8 participant_A
+u8 subtype
 ```
 
-該函式隨後直接修改 controller/runtime：
+因此 logical body（含外層 discriminator）為：
+
+```text
+2 + 19 = 21 bytes
+```
+
+### 4.2 Participant direction
+
+```text
+outer n16     = participant_A
+payload n16_2 = participant_B
+```
+
+兩者分別經 `sub_67D7D0()` 映射到 local player/slot object。[C]
+
+### 4.3 Resource anchor
+
+`resource_id` 進入：
+
+```text
+sub_5F5400(resourceTable, resource_id)
+sub_5F5450(resourceTable, resource_id)
+sub_5EF5B0
+sub_5EFE00
+sub_5EF5F0
+```
+
+因此不是 decorative field，而是 gameplay event 的重要 Resource identity。[C]
+
+### 4.4 `n2` downstream mapping
+
+```text
+n2 == 1 → sub_61FC20(..., 6, resource_id)
+n2 == 2 → sub_61FC20(..., 4, resource_id)
+n2 == 3 → sub_61FC20(..., 7, resource_id)
+n2 == 4 → sub_61FC20(..., 5, resource_id)
+default  → sub_61FC20(..., 1, resource_id)
+```
+
+這個 mapping 是 effect/presentation type，不等於 wire subtype。[C]
+
+### 4.5 `v89`／`v95`
+
+```text
+v89 → local player object +164
+v95 → local player object +172
+```
+
+公開語意仍 `[OPEN]`。[C]
+
+### 4.6 Death／state transition
+
+Participant B 的 remote branch 可進：
+
+```text
+sub_9BC470(controller, 1, timeLike, 0, 0)
+```
+
+之後直接修改：
 
 ```text
 controller +56 = 1
@@ -84,426 +153,558 @@ controller +60 = timeLike
 controller +64 = timeGetTime()
 ```
 
-並清理多組 state array／timer，最後呼叫 `sub_5B7AF0(controller)`。[C]
+並清理 controller state/timer arrays。[C]
 
-這條資料流是 gameplay state transition，不是純 UI 呈現。[C]
+因此 subtype 2/16 **包含** death/state-transition branch，但整個 subtype family 不能被命名成單一 DeathPacket。[C]
 
-同一 `sub_7463E0()` 後段還出現 `CViewObj::OnDeadCtrl` 明文診斷路徑；特定 resource category 條件成立時走該路徑，否則更新 per-player counter。[C]
+## 5. `+240600/+240604` 即時 Round K/D-like state
 
-**因此正確結論不是「所有 166 subtype 2/16 都是死亡」。** 正確描述是：
-
-> subtype 2/16 共用大型 participant/gameplay-state parser，其中存在可直接確認的 death/state-transition 分支；不同 subtype、resource category、team 關係與 local-player 狀態會改變後續結果。
-
-## 5. `+240600`／`+240604` 的直接結果計數更新
-
-`sub_7463E0()` 後半段可整理為：
-
-```c
-v68 = sub_67D7D0(n16_1);
-v67 = sub_67D7D0(n16_2);
-
-if (v68 < 0 || v67 < 0)
-    return;
-
-if (v68 != v67)
-{
-    if (sub_67D630(v68, v67)
-        && ((resource(v90[0]) category == 4)
-         || (resource(v90[0]) category == 5)))
-    {
-        // CViewObj::OnDeadCtrl diagnostic path
-    }
-    else
-    {
-        ++byte_F33120[240780 * v68 + 240600];
-    }
-}
-
-if (a4 == 0)
-    ++byte_F33120[240780 * v67 + 240604];
-```
-
-因此正常 `a4 == 0` 路徑具有明確的 participant-directed mutation：
+在正常 `a4 == 0` 路徑：
 
 ```text
-participant A → +240600 ++
-participant B → +240604 ++
+participant A → player +240600 ++
+participant B → player +240604 ++
 ```
 
-結合同一函式對 participant B 的 death-state transition，目前最穩健的語意是：
+`a4 == 1` 時不執行 victim `+240604` increment。[C]
+
+這兩個欄位在 player stride `240780` 內，並由 `RoundStat` UI 直接消費。因此目前高信度模型：
 
 ```text
-+240600 = 回合／模式局部的 Kill counter（participant A）
-+240604 = 回合／模式局部的 Death counter（participant B；a4=0）
++240600 = live round/mode-local Kill counter
++240604 = live round/mode-local Death counter
 ```
 
-這是直接 mutation + participant direction + UI cross-check 的 A 級證據。[C][X]
+## 6. subtype 3／20：shared impact/status wire form
 
-## 6. `a4 == 1` 的 subtype 16 例外
-
-Dispatcher 明確指定：
+`sub_747980()` 讀：
 
 ```text
-166 subtype 2  → a4 = 0
-166 subtype 16 → a4 = 1
+u32 gate_v21
+u8  target_or_other_player
+u16 resource_id
+u8  state_type
+u8  state_a
+u8  state_b
+u32 aux_a6
+u32 aux_n26
+u8  aux_n0x1E
 ```
+
+Body footprint：19 bytes。
+
+接受條件：
+
+```text
+gate_v21 == dword_F2A65C
+```
+
+再進：
+
+```text
+sub_747460(..., resource_id, state_type, aux_a6, aux_n26, aux_n0x1E, subtype)
+```
+
+Remote outer actor 另外進：
+
+```text
+sub_747B90(resource_id, target, state_a, state_b, outer_actor)
+```
+
+目前高可信：Resource/impact/gameplay effect family。[C]
+
+## 7. subtype 4：Resource／effect record
+
+`sub_748860()`：
+
+```text
+u32 control_or_time
+u16 control
+u32 resource_id
+u32 p0
+u32 p1
+u32 p2
+u32 p3
+u32 p4
+u32 p5
+```
+
+Body footprint：34 bytes。
+
+六個 `p0..p5` 全部由 `sub_592B40()` 等 4-byte helper 取得，並送入 `sub_61BA90()`。[C]
+
+Resource category 1–7 還會走額外 effect/presentation path。正式公開名稱仍 `[OPEN]`。
+
+## 8. subtype 5
+
+`sub_748A50()`：
+
+```text
+u32 value_0
+u8  control
+u32 resource_id
+u32 effect_0
+u32 effect_1
+u32 effect_2
+u32 effect_3
+u32 effect_4
+u32 effect_5
+```
+
+Body footprint：29 bytes。
+
+Resource category 10 會進主要特殊 branch；local/remote 有不同 downstream helper。[C][OPEN]
+
+## 9. subtype 6
+
+`sub_748CD0()`：
+
+```text
+u16 value_0
+u16 resource_id
+u32 value_2
+u32 value_3
+u32 value_4
+u32 value_5
+u32 value_6
+u32 value_7
+u8  tail
+```
+
+Body footprint：33 bytes。
+
+Resource category 10/15 有特殊 state/effect handling。[C][OPEN]
+
+## 10. subtype 7
+
+`sub_748E40()`：
+
+```text
+variable／opaque string-like data
+```
+
+透過 `sub_592730()` 寫入最多 256-byte local buffer，再交給 `sub_61FCB0()`。不可從本函式自行宣稱固定 wire length；應追 `sub_592730()`。[C][OPEN]
+
+## 11. subtype 8／9／18／25
+
+`sub_748EB0()` 主要把 actor、subtype 與 Packet 交給 vtable callback；不能從函式本體假定 body 为空。
+
+部分 context 後續還會讀 `u32` time-like field，因此完整 wire grammar 必須從 indirect callback 追。[C][OPEN]
+
+## 12. subtype 10：FIRE_BOMB family
+
+Dispatcher 先讀：
+
+```text
+u8 secondary_player_id
+u8 n13
+```
+
+後續 parser：
+
+```text
+u8  n0x1E
+u32 resource_or_action_id
+u32 n26
+u32 value
+```
+
+可直接確認 Resource fallback：
+
+```text
+FIRE_BOMB
+```
+
+因此目前是 FIRE_BOMB-related gameplay effect family；`n13=9/10/13` 的公開 enum 仍 `[OPEN]`。[C]
+
+## 13. subtype 11
+
+Dispatcher 讀：
+
+```text
+u8 n7
+```
+
+`n7 == 1` → `sub_7494B0`；其它 → `sub_749810`。
+
+`sub_749810()` 會清理 indexed player state，並在特定 `n7` 值寫入 `timeGetTime()`。[C]
+
+目前語意：player timer/state reset family；公開 enum `[OPEN]`。
+
+## 14. subtype 12
+
+```text
+u16 value_A
+u16 value_B
+```
+
+Body footprint：4 bytes。
+
+下游：
+
+```text
+sub_67CD20(n9_0, value_A, value_B, 2 - !sub_67F2F0())
+```
+
+目前為 two-u16 state/control event。[C][OPEN]
+
+## 15. subtype 13
+
+Inline lifecycle/reset path：
+
+```text
+byte_F6DD11[16 slots] = 0
+sub_95EC00(slot) × 16
+sub_718000
+sub_7603A0
+sub_67B5C0(...)
+sub_62D570
+sub_720A10
+```
+
+`sub_67B5C0` 已與 `CGameRule::NewGameStart` 對上，因此是 Server-driven Game/round reset/start path。[C]
+
+不可直接改名成 Respawn、RoundEnd 或 RoundStart，直到與 GameRule 133/134/137/138、269 state 完整串接。[OPEN]
+
+## 16. subtype 14：transform sample
+
+精確 body：
+
+```text
+u32 sample_or_time
+u16 sample_a
+u16 sample_b
+u16 sample_c
+u16 sample_d
+u8  flag
+```
+
+Body footprint：13 bytes。
+
+`sub_5B3DD0()` 保存 transform samples，後續 `IPaperCtrl::sub_9BCBD0()` 做插值。[C]
+
+四個 u16 的 signedness／軸向公開語意需由 ASM/LST 進一步確認；目前只稱 spatial/transform sample components。[C][OPEN]
+
+## 17. subtype 15
+
+`sub_748420()`：
+
+```text
+u8  target_player_id
+u16 resource_id
+u8  state_39
+u8  state_30
+u8  state_35
+u32 target_controller_state
+u32 auxiliary
+u8  n0x1E
+```
+
+Body footprint：15 bytes。
+
+直接 mutation：
+
+```text
+target_controller +16 = target_controller_state
+```
+
+並以 `resource_id` 做 Resource state/effect handling。[C][OPEN]
+
+## 18. subtype 17
+
+`sub_748FF0()` 與 callback family 類似，會刷新：
+
+```text
+sub_7093A0
+sub_9F94C0
+sub_62DCF0
+sub_62E9E0
+sub_62C180
+sub_5A06B0
+```
+
+目前保持為 callback/state event family。[C][OPEN]
+
+## 19. subtype 19／23／30／31／32
+
+目前 handler 定位：
+
+```text
+19 → sub_74D150
+23 → sub_74D410
+30 → sub_74D510
+31 → sub_74D5D0
+32 → sub_74D5D0
+```
+
+完整 parser 尚未閉合；目前禁止從函式名稱或相鄰 subtype 猜公開 semantic。[C][OPEN]
+
+## 20. subtype 21
+
+Payload：
+
+```text
+u8 participant
+u16 resource_id
+u8 effect_a
+u8 effect_b
+```
+
+Body footprint：5 bytes。
+
+`sub_747B90()` 會使用 Resource、effect values 與 target actor；目前高可信：compact resource/action event。[C][OPEN]
+
+## 21. subtype 22
+
+`sub_747AB0()`：
+
+```text
+u32 state_token
+u8  participant_B
+u16 resource_id
+u8  n20
+u32 value_0
+u32 value_1
+u8  tail_flag
+```
+
+Body footprint：16 bytes。
+
+需要：
+
+```text
+state_token == dword_F2A65C
+```
+
+再進 `sub_747460()`；與 subtype 3/20 共用 effect/impact machinery，但 downstream path 不完全相同。[C][OPEN]
+
+## 22. subtype 24
+
+Inline body：
+
+```text
+u16 field_A
+u16 field_B
+u32 elapsed_like
+u8  flag
+```
+
+Body footprint：9 bytes。
+
+其中 `elapsed_like` 會以：
+
+```text
+minutes = value / 1000 / 60
+seconds = value / 1000 % 60
+```
+
+進 `sub_7498E0()`，因此為 server-driven gameplay time presentation/update family。[C][OPEN]
+
+`1000` 是 Client presentation calculation divisor，不應單獨宣布為協定單位定義。
+
+## 23. subtype 26
+
+`sub_745F50()` parser：
+
+```text
+u32
+u16
+u16
+u16
+u8
+u8
+u8
+u8
+u8
+u32
+```
+
+Body footprint：17 bytes。
+
+後續進 `sub_604AC0()`。正式 semantic `[OPEN]`。[C]
+
+## 24. subtype 27／29
+
+`sub_746060()` parser：
+
+```text
+u32
+u16
+u16
+u16
+u16
+u8
+u32
+u32
+u8
+u32
+u8
+u32
+```
+
+Body footprint：34 bytes。
+
+具有 `CViewObj::OnBotDeadCtrl` 診斷與 `n27 == 27` 特殊 branch，因此至少屬 bot/player AI death/state family；欄位語意仍 `[OPEN]`。[C]
+
+## 25. subtype 20
+
+`sub_747980()` 與 subtype 3 共用 parser，但 `n3=20` 會影響 `sub_747460()` downstream branch。
 
 因此：
 
 ```text
-if (a4 == 0)
-    victim +240604 ++
+wire structure ≈ subtype 3
+semantic context != necessarily subtype 3
 ```
 
-只存在於 subtype 2 的這條路徑；不能把 subtype 16 當成完全相同的 Kill/Death packet。[C]
+不能只因共用 parser 就宣稱兩者完全相同。[C]
 
-當 `n16_2 == localPlayer` 且 `sub_67EE30()` 成立時，`a4` 還會控制 local gameplay timing/state：
+## 26. 166 Event → Resource → State 的共同架構
+
+大量 subtype 皆呈現同一結構：
 
 ```text
-if (a4 == 1)
-    this +96 = 4000
-else
-    this +96 = 0
-```
-
-因此 `a4` 不只是語法上的參數，而是實際控制不同 gameplay state branch 的重要維度。[C]
-
-## 7. `+240600`／`+240604` 的 UI 交叉驗證
-
-初始化可直接看到：
-
-```c
-*(this + 240600) = 0;
-*(this + 240604) = 0;
-```
-
-`CyIndividualSurvivalMode::sub_76FA50()` 的 `RoundStat` 顯示路徑直接讀取：
-
-```c
-player->field_240600
-```
-
-並送入 `Num16x16` renderer。[C]
-
-另一條 member/result presentation builder `sub_640110()` 也同時讀取：
-
-```text
-+240600
-+240604
-```
-
-兩者一直位於相同的 player stride `240780` 中，支持它們是 per-player round/stat pair。[C][X]
-
-## 8. `+60150`／`+60151` 是另一層 Result-screen 狀態
-
-結果 UI 明確使用：
-
-```text
-+60150 → SOLO_RESULT_R_MY_KILL
-+60151 → SOLO_RESULT_R_MY_DEATH
-```
-
-這兩個欄位不是 `+240600/+240604` 的同一物理儲存位置，因此 Server model 應分開：
-
-```text
-Live round / mode-local stats
-├─ +240600 Kill
-└─ +240604 Death
-
-Result-screen MY stats
-├─ +60150 My Kill
-└─ +60151 My Death
-```
-
-兩組數值可能在某些情境同步，但不能因此假定同一 update event 或同一 authority layer。[C]
-
-## 9. `+60150` 的重要 Negative Evidence
-
-對完整 `PaperMan.exe.c` 做 `60150` exact search，目前主要看到 result/UI 讀取：
-
-```c
-v93 = *(v94 + 60150);
-```
-
-並送入 `SOLO_RESULT_R_MY_KILL`。[C]
-
-相較之下，`+60151` 可以找到更直接的 death-path write：
-
-```c
-*(v12 + 60151) = 1;
-```
-
-且位置緊鄰 health/controller death-state transition。[C]
-
-因此目前必須保留這個證據區分：
-
-```text
-+60151
-    = client-visible My Death result field
-    = 存在直接 death-path write
-
-+60150
-    = client-visible My Kill result field
-    = 目前未找到同等直接的 gameplay increment/write
-```
-
-不能因 result label 是 `MY_KILL`，就推論 Client 每次正式 PvP kill 都直接 `++60150`。[C][OPEN]
-
-## 10. `n2` 是 effect/result selector，不可直接命名成 Kill/Hit/Death
-
-subtype 2/16 parser 後段：
-
-```text
-n2 == 1 → sub_61FC20(..., 6, v90[0])
-n2 == 2 → sub_61FC20(..., 4, v90[0])
-n2 == 3 → sub_61FC20(..., 7, v90[0])
-n2 == 4 → sub_61FC20(..., 5, v90[0])
-default  → sub_61FC20(..., 1, v90[0])
-```
-
-因此 `n2` 是控制 downstream presentation/effect path 的離散事件值，且與 resource ID `v90[0]` 聯合使用。目前不足以單靠數字把它命名成 hit、kill 或 death。[C][OPEN]
-
-## 11. Resource lookup 是 166 語意的重要錨點
-
-多個 subtype handler 會呼叫：
-
-```text
-sub_5F5400(dword_1CC95A0, resourceId)
-sub_5F5450(dword_1CC95A0, resourceId)
-```
-
-並依 Resource metadata category（例如 `sub_5EF5B0`、`sub_5EFE00`、`sub_5EF5F0`）選擇不同 downstream behavior。[C]
-
-因此解釋 166 numeric fields 時，標準方法應是：
-
-```text
-166 field
-  → Resource ID
-  → Resource table
-  → category / metadata
-  → effect/state handler
-```
-
-不能孤立從一個數值命名遊戲語意。[C]
-
-## 12. 166 subtype 14 與 UDP movement 是兩個同步層
-
-`166 subtype 14 → sub_749AB0`：
-
-```text
-u32 time-like
-u16 × 4
-u8 flag
-    → sub_5B3DD0
-    → two transform samples
-    → IPaperCtrl::sub_9BCBD0
-    → position/vector + angle interpolation
-```
-
-同時 UDP `8/24 → sub_596940` 存在明文 diagnostic：
-
-```text
-BUGCUDPNetworkManager::OnY_UDP_S_MOVE_INF
-```
-
-且 `n15 == 13` 時會進入 queue。[C]
-
-因此目前應維持：
-
-```text
-TCP 166 subtype 14
-    = gameplay actor-state / interpolation event
-
-UDP 8 / 24
-    = dedicated S_MOVE_INF family
-```
-
-它們同屬 gameplay synchronization，但 wire protocol 不應合併。[C]
-
-## 13. UDP movement queue 目前只能證實 enqueue
-
-`sub_596940()`：
-
-```c
-if (n15 == 13)
-    sub_593750(&byte_1324330, packet);
-```
-
-`sub_593750()`：
-
-```text
-EnterCriticalSection
-  → sub_5951C0(queue, ..., packet)
-LeaveCriticalSection
-```
-
-`sub_5951C0()` 建立 list node，保存傳入 packet data／length-like value。[C]
-
-`sub_593510()` 則在 UDP manager shutdown／cleanup 時迭代 queue、呼叫 `sub_602E30` 處理 node payload，再清空 node list，因此它不能直接被命名成 8/24 movement decoder。[C]
-
-目前在 C export 中找不到 `sub_5937D0()` 的直接 callsite；它較可能透過 thread、state machine 或 vtable 間接驅動。其自身只根據 state 選擇 `sub_593830()`、檢查 `sub_5941D0()` 或回傳 ready/terminal-like 條件。[C]
-
-因此 queue consumer 仍 `[OPEN]`。
-
-## 14. UDP Receive Architecture
-
-目前可固定為：
-
-```text
-CUDPManager::sub_595840
-  → sub_595A60
-  → recvfrom / packet framing
-  → sub_595E80
-  → opcode dispatcher
-```
-
-已觀察到的 UDP opcode 包含：
-
-```text
-2,4,5,6,8,24,10,12,13,14,15,18,20,22,26,28,29,31,33,34,154,158
-```
-
-各自進入獨立 handler。[C]
-
-目前只有 8/24 可以由明文 `S_MOVE_INF` 路徑直接標記為 movement pair；其餘 UDP opcode 不得因為格式相似就猜成 movement。[C]
-
-## 15. UDP Endpoint 與 Transport
-
-CUDPSocket constructor 會初始化 default port `27000`，建立 `SOCK_DGRAM`。[C]
-
-`sub_596DA0()`、`sub_596E60()` 直接使用：
-
-```text
-inet_addr(ip)
-htons(port)
-```
-
-`sub_596EB0()` / `sub_596F00()` 使用 `sendto`，`sub_596F90()` 使用 `recvfrom`。[C]
-
-因此 Client 存在明確 UDP gameplay transport。
-
-## 16. Client → Server Damage 與 Server → Client Result 必須分層
-
-Client send path 可直接找到：
-
-```text
-sub_55CAB0 / sub_55D090 / sub_55D530
-    → packet opcode 165
-```
-
-165 payload 會依 damage subtype、resource、mode 產生不同尾段。[C]
-
-其中有些 `sub_592B20` 呼叫不能把參數看成 1-byte wire value；helper 實作實際可能寫入 4 bytes，因此必須檢查底層 serializer，而不是相信 Hex-Rays 表面 prototype。[C]
-
-目前最安全的 authority 分層是：
-
-```text
-165
-= Client → Server damage / report path
-
 166
-= Server → Client gameplay event / state synchronization family
+ ↓
+actor／participant discriminator
+ ↓
+subtype
+ ↓
+resource／state scalar
+ ↓
+Resource lookup
+ ↓
+state/effect bridge
+ ↓
+player/controller mutation
+ ↓
+UI／sound／quest／secondary packet
 ```
 
-但不能只因 opcode 前後配對，就自行假設一對一 request/response 關係；仍需繼續追 sequence 與 server validation。[C][OPEN]
+因此後續 Server reconstruction 的抽象單位應是 `GameplayEventEnvelope`，而不是單一 `DamageAck`。[C]
 
-## 17. Wiki 行為與 166 的交叉驗證
+## 27. K/D 三層資料邊界
 
-日本 Wiki 提供以下歷史玩家可見規則，可作為外部語意錨點：
-
-- 個人サバイバル的結果與擊倒人數、時間條件相關。
-- 重生後存在 5 秒無敵時間。
-- Kill Log 區分一般擊殺、特殊射擊與 Assist。
-- 2014-09-17 起有 Assist Point；例如造成至少最大 HP 55% 傷害後由其他玩家擊倒可產生 Assist Point，治療隊友達到一定 HP 比例也可產生 Assist Point。[WIKI]
-
-這些資料用於驗證 Client event／state chain 是否符合玩家可觀察行為，但不能直接當作 166 wire field proof。
-
-## 18. Server Model 的必要抽象層
-
-Server reconstruction 至少應拆成：
+目前必須分開：
 
 ```text
-PlayerIdentity
-PlayerSlot
-ActorGameplayState
-ActorTransformState
-Hit/DamageReport
-DeathStateTransition
-RoundKillCounter
-RoundDeathCounter
-ResultMyKill
-ResultMyDeath
-Mode/round-local result counters
-AssistState / AssistPointState
-RespawnState
-ResourceEffectId
-ResourceCategory
++240600/+240604
+    = live round/mode-local K/D-like counters
+
+F6DCF8/F6DCFC
+    = Server-provided result/team K/D
+
++60150/+60151
+    = local result-screen My K/D
 ```
 
-尤其不要把 166 直接抽象成單一：
+其中 `F6DCF8/F6DCFC` 由 `TCP 269 subtype 7` repeated player records 直接灌入；目前沒有找到 166 handler 直接 `++F6DCF8` 或 `++F6DCFC`。[C]
+
+因此不能假定：
 
 ```text
-DeathPacket
+166 kill event → F6DCF8++
 ```
 
-更符合目前證據的形式是：
+## 28. Player Identity：PlayerId != SlotIndex
+
+所有 166／score/death path 都顯示 PlayerId、SlotIndex、Team/Group 與 RuntimeObject 必須分離。`sub_67D7D0()` 負責把 compact identity 映射到 local player/slot state。[C]
+
+Server model 至少保持：
 
 ```text
-GameplayEventEnvelope
-{
-    ActorId,
-    Subtype,
-    Payload
-}
+PlayerId
+SlotIndex
+Team/Group
+RuntimeObject
+ConnectionState
 ```
 
-再依證據閉合程度解包各 subtype。[C]
+## 29. TCP transport boundary
 
-## 19. 研究中最重要的證據邊界
-
-目前必須嚴格保持以下區別：
+部分 165 sender 走：
 
 ```text
-+240600
-    = round / mode-local Kill side state
-
-+240604
-    = round / mode-local Death side state（a4=0）
-
-+60150
-    = result-screen My Kill field
-
-+60151
-    = result-screen My Death field
+sub_58D7D0(byte_13242F8, packet)
 ```
 
-以及：
+部分 runtime/state path 走：
 
 ```text
-166 subtype 2/16
-    ≠ 固定 Death Packet
-
-166 subtype 14
-    ≠ UDP S_MOVE_INF
-
-165
-    ≠ 已證明的單一 166 response
+sub_602E00(packet)
 ```
 
-這些邊界是目前 Server reconstruction 最容易因過度抽象而出錯的地方。
-
-## 20. 尚未閉合的 Proof Targets
+目前不能假定兩者等價。仍需追：
 
 ```text
-1. 找出 +60150 的真正 writer/source。
-2. 找出 Assist event 的 producer 與 packet/type chain。
-3. 完整解出 subtype 2/16 的所有 mode/resource 分支。
-4. 解出 n2 → effect type 1/4/5/6/7 → resource metadata 的關係。
-5. 完整追 166 death → kill/assist → respawn → result 的事件鏈。
-6. 完整解析 UDP 8/24 S_MOVE_INF payload 與 queue consumer。
-7. 找出 165 damage payload 每一欄位的真實寬度與 server validation。
-8. 用 LST/ASM 補強 Hex-Rays 可疑 serializer prototype。
-9. 將 Wiki 的 kill/assist/respawn 規則與 Client resource/effect state 三方交叉閉合。
+packet finalization
+→ length/header
+→ queue/send
+→ encryption/checksum
+→ socket
 ```
 
-除非新證據真正封閉上述項目，否則相關欄位維持 `[OPEN]`，不可為方便 Server 實作而硬編碼。
+因此 logical payload 與 final TCP frame 必須分開記錄。[C][OPEN]
+
+## 30. Evidence Matrix
+
+| 項目 | 狀態 |
+|---|---|
+| 165 = `Y_TCP_INF_REQ` | CLOSED |
+| 166 = `Y_TCP_INF_ACK` | CLOSED |
+| 165 為 polymorphic family | CLOSED |
+| 165 subtype 16 = MultiDamage | CLOSED |
+| 165 subtype 21 = BotSuicide | CLOSED |
+| 166 second byte = event discriminator | CLOSED |
+| 166 subtype 2/16 包含 death/state transition | HIGH |
+| 166 subtype 13 = Game/round reset path | HIGH |
+| 166 subtype 14 = transform sample | HIGH |
+| 166 subtype 24 = timing/state path | HIGH |
+| +240600/+240604 = live round K/D-like | HIGH |
+| F6DCF8/F6DCFC = Server-provided result K/D | CLOSED |
+| 166 直接修改 F6DCF8/F6DCFC | NOT FOUND |
+| 所有 `sub_592B20` caller 的 wire width | OPEN |
+| `sub_58D7D0` / `sub_602E00` 完整 transport boundary | OPEN |
+| 所有 subtype public semantic | OPEN |
+
+## 31. Server reconstruction 禁止事項
+
+不要寫：
+
+```text
+165 = DamagePacket
+166 = DamageAck
+166 → Score.Kill++
+```
+
+應保持：
+
+```text
+YTcpInfReq
+    Opcode = 165
+    EventSubtype = subtype-specific
+    Payload = exact serializer-defined grammar
+
+YTcpInfAck
+    Opcode = 166
+    ActorOrSubject = first discriminator
+    EventSubtype = second discriminator
+    Payload = subtype-specific
+```
+
+未知欄位、writer width、state mutation、resource lookup、caller/callee 都應保留到證據閉合。[C][RES][WIKI][X]
+
+## 32. 下一輪最高優先級
+
+```text
+A. 完整追 sub_592B20
+B. 完整追 sub_58D7D0 / sub_602E00
+C. 建立全部 165 subtype caller→state graph
+D. 完整閉合 166 n18=3/20
+E. 追 166 ↔ 269 K/D aggregation / replacement
+F. 用 LST/ASM 驗證可疑 serializer prototype
+G. 把 Y_TCP_INF Resource IDs 對到 Extracted 資源
+H. 比對 166 subtype 14 與 UDP 8/24 對 actor controller 的寫入先後
+```
+
+在證據未閉合前，不為未知欄位填入猜測值。
