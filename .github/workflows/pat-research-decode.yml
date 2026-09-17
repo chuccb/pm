@@ -1,0 +1,135 @@
+name: Research Decode ui/cfg PAT
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode PAT resources
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
+          import json
+          import re
+
+          ROOT = Path("Extracted/ui/cfg")
+          OUT = Path("_research/pat-decoded")
+          OUT.mkdir(parents=True, exist_ok=True)
+
+          FILES = [
+              "Quest.pat",
+              "RecommandItem.pat",
+              "itemdata.pat",
+              "maplist.pat",
+              "partsability.pat",
+              "weaponparts.pat",
+          ]
+
+          def rol8(x, r):
+              r &= 7
+              x &= 0xff
+              if r == 0:
+                  return x
+              return ((x << r) | (x >> (8-r))) & 0xff
+
+          def ror8(x, r):
+              r &= 7
+              x &= 0xff
+              if r == 0:
+                  return x
+              return ((x >> r) | (x << (8-r))) & 0xff
+
+          def decode(data: bytes) -> bytes:
+              buf = bytearray(data)
+              state = len(buf) & 0xffffffff
+              for i in range(len(buf)-1, -1, -1):
+                  buf[i] = ror8((buf[i] ^ state) & 0xff, i)
+                  state = ((state ^ 0xFA5387AD) & 0x0F3A94AA) ^ ((i | state) + 1217682890)
+                  state &= 0xffffffff
+              return bytes(buf)
+
+          def sha256(b):
+              return hashlib.sha256(b).hexdigest()
+
+          def printable_ratio(b):
+              if not b:
+                  return 0.0
+              sample = b[:200000]
+              ok = sum(1 for x in sample if x in (9,10,13) or 32 <= x < 127)
+              return ok / len(sample)
+
+          summary = {}
+
+          for name in FILES:
+              raw_path = ROOT / name
+              raw = raw_path.read_bytes()
+              dec = decode(raw)
+              (OUT / name).write_bytes(dec)
+
+              entry = {
+                  "raw_size": len(raw),
+                  "decoded_size": len(dec),
+                  "raw_sha256": sha256(raw),
+                  "decoded_sha256": sha256(dec),
+                  "decoded_printable_ratio_first_200k": printable_ratio(dec),
+              }
+
+              if name == "maplist.pat":
+                  import struct
+                  entry["first_f32_le"] = struct.unpack_from("<f", dec, 0)[0]
+                  entry["first_u32_le"] = struct.unpack_from("<I", dec, 4)[0]
+                  entry["first_80_hex"] = dec[:80].hex()
+              else:
+                  for enc in ("utf-8", "cp932", "shift_jis"):
+                      try:
+                          text = dec.decode(enc)
+                          entry["text_encoding"] = enc
+                          entry["first_20_lines"] = text.splitlines()[:20]
+                          entry["line_count"] = len(text.splitlines())
+                          entry["comma_field_counts_first_20"] = [
+                              len(line.split(",")) for line in text.splitlines()[:20]
+                          ]
+                          break
+                      except UnicodeDecodeError:
+                          continue
+
+              summary[name] = entry
+
+          (OUT / "summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+
+          # Also make a compact textual report for easy inspection.
+          report = []
+          for name, e in summary.items():
+              report.append(f"## {name}")
+              report.append(f"raw_size={e['raw_size']} decoded_size={e['decoded_size']}")
+              report.append(f"raw_sha256={e['raw_sha256']}")
+              report.append(f"decoded_sha256={e['decoded_sha256']}")
+              if "text_encoding" in e:
+                  report.append(f"encoding={e['text_encoding']} line_count={e['line_count']}")
+                  report.extend(e["first_20_lines"])
+              else:
+                  report.append(f"first_f32_le={e.get('first_f32_le')}")
+                  report.append(f"first_u32_le={e.get('first_u32_le')}")
+                  report.append(f"first_80_hex={e.get('first_80_hex')}")
+              report.append("")
+          (OUT / "REPORT.md").write_text("\n".join(report), encoding="utf-8")
+
+      - name: Upload decoded resources
+        uses: actions/upload-artifact@v4
+        with:
+          name: pat-research-decoded
+          path: _research/pat-decoded
+          if-no-files-found: error
+          retention-days: 7
