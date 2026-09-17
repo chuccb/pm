@@ -6,6 +6,24 @@
 
 本目錄不追求「每個功能一份 Markdown」，而是追求 **每個問題都有唯一且明確的閱讀入口**。先找到主文件，再沿著它指向的 Field Evidence／Schema／Detail 深入；不要在多份摘要之間來回比對。
 
+## 一眼看懂
+
+```text
+我想知道「封包怎麼走」
+→ Network_Protocol.md
+
+我想知道「這個 Packet 的 bytes 是什麼」
+→ 對應的 Schema / Field Evidence
+
+我想知道「這些 bytes 在遊戲裡代表什麼」
+→ 對應的 Domain 主文件
+
+我想知道「Server 最後應保存什麼」
+→ Server_State_Model.md
+```
+
+因此不要把「wire truth」、「gameplay semantic」與「Server abstraction」混在一起。它們是三個不同層級；下層證據可以支撐上層抽象，但上層抽象不得反向補出下層不存在的證據。
+
 ## 先建立整體脈絡
 
 ```text
