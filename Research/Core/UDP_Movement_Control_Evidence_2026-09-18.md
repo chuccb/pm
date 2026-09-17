@@ -2,85 +2,82 @@
 
 > 研究日期：2026-09-18。
 > Target：日本版 PaperMan 2016 年服務終了時的最終 Client。
-> 本文件是 `Network_Protocol.md` 的深度證據附錄：集中保存本輪新閉合的 UDP movement、peer、control-plane、recovery 與 BulletHole 交叉驗證；不取代其它 Domain 文件的 semantic truth。
+> 本文件是 `Network_Protocol.md` 的深度證據附錄：集中保存 UDP movement、peer/control-plane、recovery 與 BulletHole 交叉驗證；Packet／crypto canonical truth 仍以 `Network_Protocol.md` 為準。
 
 ## 1. 最重要的結論
 
-目前已直接從 `PaperMan.exe.c` 閉合：
+目前已直接從 `PaperMan.exe.c`／原始 EXE 閉合：
 
 ```text
 Server → Client
 UDP opcode 8 / 24
-payload = u8 actor_count + N × 26-byte ActorRecord
+payload = u8 actor_count + N × 27-byte fixed ActorRecord
 
-Client → current UDP peer
+Client → UDP peer
 UDP opcode 23
-payload = 27 bytes
+payload = 27-byte fixed LocalMovementState
 ```
 
-其中兩方向的位置編碼已形成直接 C→C 交叉：
+兩方向的位置編碼直接形成同一量化家族：
 
 ```text
 Client serializer:
-    u16(round(world_value * 3.0 + 0.5))
+    u16((world_value * 3.0) + 0.5)
 
 Server→client decoder:
     u16 / 3.0
 ```
 
-所以可高可信建立 1/3 world-unit 的量化家族；但不應超出 C evidence 自行推導負值 overflow、外部座標限制或完整 rounding policy。[C][X]
+因此目前可安全保留「以 1/3 world-unit 類量化表示」的描述；負值、overflow、world-origin 與完整 rounding policy 不自行補。[C][EXE][X]
+
+---
 
 ## 2. UDP transport 基礎
 
 ### 2.1 Socket
 
-`CUDPSocket` 使用：
+`CUDPSocket`：
 
 ```text
 socket(AF_INET, SOCK_DGRAM, 0)
 ```
 
-constructor 將 port-like member 初始化成 `27000`；但實際 bind 使用的是 runtime `+56`，不是永久常數，因此：
+constructor 將 port-like member 設為 `27000`，但 `sub_596DA0()` 綁定的是 runtime local-port member：
 
 ```text
-27000 = constructor default
-≠ 已證明的最終 local/server port
+local bind = 0.0.0.0 : runtime local port
+remote endpoint = supplied IP/port
 ```
 
-`sub_596DA0()`：
+所以 `27000` 只能稱為 constructor default，不能直接當作最終 server UDP port。[C]
 
-```text
-local bind address = INADDR_ANY + local-port member
-remote endpoint    = cp + hostshort
-```
-
-`sub_596EB0()` / `sub_596F00()` / `sub_596F50()` 為 `sendto` wrappers；`sub_596F90()` / `sub_596FF0()` 為 `recvfrom` wrappers。[C]
-
-### 2.2 Receive thread
+### 2.2 Receive loop
 
 ```text
 CUDPManager::sub_595840
-    → loop
     → sub_595A60
     → recvfrom(..., 9600)
-    → Packet parse/validation
+    → Packet framing / validation / transform
     → sub_595E80
 ```
 
-`sub_595840()` 每輪 `_sleep(1)`。[C]
+receive loop 每輪有 `_sleep(1)`。[C]
 
-### 2.3 Current peer
-
-`sub_595BD0()` 回傳 manager +2420..2423 的 sockaddr storage。
-
-因此 Server model 應把：
+### 2.3 Destination separation
 
 ```text
-UDP local endpoint
-UDP current peer endpoint
+Configured UDP destination
+    = CUDPSocket +40 area
+    = sub_595A10 / sub_596F00
+
+Per-player learned peer endpoint
+    = unk_F6D584 / unk_F6D594
+    = sendto(caller sockaddr)
 ```
 
-分成兩個 state。
+因此 Client 同時存在 configured destination 與 per-player peer endpoint 兩種 addressing state。[C]
+
+---
 
 ## 3. UDP receive dispatcher
 
@@ -111,93 +108,131 @@ UDP current peer endpoint
 158 → sub_596910
 ```
 
-因此低 opcode 不可簡化成單一 movement message；它同時包含 peer state、movement、health/recovery 等控制資料。[C]
+低 opcode 涵蓋 peer maintenance、movement、health/recovery 與 latency/control traffic。[C]
+
+---
 
 ## 4. Server → Client movement：opcode 8/24
 
-`sub_596940()` 有明文診斷：
+`sub_596940()` 存在明文：
 
 ```text
 BUGCUDPNetworkManager::OnY_UDP_S_MOVE_INF : [g_byGamePlay : %d]
 ```
 
-只有 `n15 == 13` 才進 `sub_593750()`；之後由 queue 到 `sub_602E30()` 解碼。[C]
+只有 gameplay gate `n15 == 13` 時才進 `sub_593750()` queue；之後由 `sub_602E30()` 解析。[C]
 
-### 4.1 Payload
+### 4.1 Wire structure
 
 ```text
-u8 N
-N × ActorRecord(26 bytes)
+u8 actor_count
+N × ActorRecord
 ```
 
-### 4.2 ActorRecord
+每筆固定 record 為 **27 bytes = 0x1B**：
 
 ```text
-R+00  u8   field00                     [OPEN]
-R+01  u8   field01                     [OPEN]
-R+02  u8   actor/user identity cand.   [OPEN namespace]
-R+03  u32  field03                     [OPEN]
-R+07  u32  movement/sample value        [OPEN]
-R+0B  u8   ActorStateByte               [confirmed state byte]
-R+0C  u16  QuantizedPos0
-R+0E  u16  QuantizedPos1
-R+10  u16  QuantizedPos2
-R+12  u8   state/controller byte        [OPEN]
-R+13  u8   state/controller byte        [OPEN]
-R+14  u8   state/controller byte        [OPEN]
-R+15  u8   state/controller byte        [OPEN]
-R+16  u8   StateOrEmotionId
-R+17  u32  ActionOrResourceValue        [OPEN namespace]
+R+00  u8
+R+01  u8
+R+02  u8
+R+03  u32
+R+07  u32
+R+0B  u8
+R+0C  u16
+R+0E  u16
+R+10  u16
+R+12  u8
+R+13  u8
+R+14  u8
+R+15  u8
+R+16  u8
+R+17  u32
 ```
 
-位移：
+**舊 26-byte 結論已正式撤銷。** 錯誤來自把 Hex-Rays local array／scratch storage 與實際 fixed-width reader consumption 混淆；`v25` 雖為較大的 local array，wire reader 實際只消費一個 byte。[C]
+
+### 4.2 Field model
 
 ```text
-3 + 4 + 4 + 1 + 6 + 4 + 4 = 26 bytes
+R+00  u8   field00                          [OPEN]
+R+01  u8   field01                          [OPEN]
+R+02  u8   actor/player identity candidate  [Strongly Supported]
+R+03  u32  field03                          [OPEN]
+R+07  u32  field07                          [OPEN]
+R+0B  u8   actor state byte                 [Strongly Supported]
+R+0C  u16  quantized spatial component 0    [Confirmed spatial]
+R+0E  u16  quantized spatial component 1    [Confirmed spatial]
+R+10  u16  quantized spatial component 2    [Confirmed spatial]
+R+12  u8   controller/state byte            [OPEN]
+R+13  u8   controller/state byte            [OPEN]
+R+14  u8   controller/state byte            [OPEN]
+R+15  u8   controller/state byte            [OPEN]
+R+16  u8   generic state/action selector    [Strongly Supported]
+R+17  u32  Resource/Action identity cand.   [Strongly Supported]
 ```
 
-`R+0B` 不是 padding：`sub_5B3180(actor, R+0B)` 直接把 byte 寫入 actor +233。[C]
+`R+02` 進 `sub_67DF00()` / `sub_67D7D0()`，並在 `<16` remote-slot domain 內取得 actor/player runtime object；因此高度支持 identity，但 exact public namespace 仍 `[OPEN]`。[C]
 
-## 5. `R+0C/R+0E/R+10`：座標量化閉環
+`R+0B` 進 `sub_5B3180(actor, byte)` 並寫 actor runtime `+233`，所以不是 padding。[C]
 
-Server→client：
+`R+16` 進 generic `sub_5B34B0()` state/action machinery；`16..25` 是其中已確認的 Emotion command/state 子域，但整欄不能命名成 `EmotionId`。[C]
+
+`R+17` 進 `sub_548E80()`；`sub_548C80()` 以 Resource/Action whitelist 驗證它，包含：
 
 ```text
-float0 = wire_u16_0 / 3.0
-float1 = wire_u16_1 / 3.0
-float2 = wire_u16_2 / 3.0
+0
+BOMBPLANT
+Pulp_A
+Pulp_B
+magic_finger
+Escape
 ```
 
-Client→peer opcode 23：
+以及 actor weapon/resource identity entries；exact namespace `[OPEN]`。[C]
+
+---
+
+## 5. Spatial encoding：雙向對稱
+
+Server→Client：
 
 ```text
-wire_u16_0 = u16(round((this+16) * 3.0 + 0.5))
-wire_u16_1 = u16(round((this+20) * 3.0 + 0.5))
-wire_u16_2 = u16(round((this+24) * 3.0 + 0.5))
+float0 = R+0C / 3.0
+float1 = R+0E / 3.0
+float2 = R+10 / 3.0
 ```
 
-因此兩方向不是剛好「都用了三」，而是可以直接串成同一個 wire encoding family。[C][X]
-
-目前仍保留：
+Client→UDP peer opcode 23：
 
 ```text
-axis 0/1/2 ↔ 引擎 public X/Y/Z 名稱
+R+0C = u16((this+16) * 3.0 + 0.5)
+R+0E = u16((this+20) * 3.0 + 0.5)
+R+10 = u16((this+24) * 3.0 + 0.5)
+```
+
+因此是同一 quantized spatial wire family。[C][X]
+
+尚未閉合：
+
+```text
+axis ↔ public X/Y/Z naming
 negative range
-overflow handling
+overflow behavior
 world-origin convention
+exact rounding policy
 ```
 
-為 OPEN。
+---
 
-## 6. `R+16`：StateOrEmotionId
+## 6. `R+16` / Emotion 子域
 
-`sub_9A8580(n)` 精確為：
+`sub_9A8580(n)` 精確判斷：
 
-```c
-return n >= 16 && n <= 25;
+```text
+16 <= n <= 25
 ```
 
-`sub_7170F0()` 建立十個 Emotion entries：
+`sub_7170F0()` 建立：
 
 ```text
 emotion1  = 16
@@ -212,74 +247,56 @@ emotion9  = 24
 emotion10 = 25
 ```
 
-`sub_7173E0()` 以這個值查 Emotion table；`sub_7170D0()` 再將 emotion ID 交給 actor path。[C]
-
-因此正式 wire 模型：
+因此：
 
 ```text
-StateOrEmotionId ∈ 16..25
-    → definite Emotion ID domain
+R+16 ∈ 16..25
+    → Confirmed Emotion command/state domain
 
-otherwise
-    → generic state/action path
+R+16 outside 16..25
+    → generic actor state/action domain
 ```
 
-不能把整個欄位叫成 `EmotionId`。[C][X]
+Wiki 的《操作ガイド》亦將 F12 對應 Emotion、F11 可隱藏 Emotion list；這是玩家可見層的獨立 corroboration，但不取代 C-level state boundary。[WIKI][C]
 
-Wiki 亦描述：
+---
 
-```text
-F11 = emotion list hide
-F12 = emotion
-```
+## 7. Client → UDP peer movement：opcode 23
 
-與 client 內 16..25 的 Emotion subsystem 相互吻合。
-
-Wiki：
-https://wikiwiki.jp/paperman/操作ガイド
-
-## 7. Client → current peer movement：opcode 23
-
-`sub_744450()`：
+`sub_744450()` 建立 opcode 23，後續：
 
 ```text
-Packet opcode 23
-→ sub_602D70
+sub_602D70
 → sub_596B90
 → sub_595A10
-→ current UDP peer
+→ current UDP destination/peer
 ```
 
-在正常 PM_UDPSTART gameplay context 下，current peer 為 server endpoint，因此 Server reconstruction 應接收 opcode 23 作為 client-generated movement/state input。[C]
-
-### 7.1 精確 payload
+### 7.1 Fixed payload
 
 ```text
-+00 u32  session/account-like = *sub_417D00()
-+04 u8   byte_EE896D
-+05 u8   Actor/User identity candidate = sub_67D010()
-+06 u16  dword_EE8CB4
-+08 u32  tick/frame/time-like = n0x64_0
-+0C u8   MoveStateFlags
-+0D u16  QuantizedPos0
-+0F u16  QuantizedPos1
-+11 u16  QuantizedPos2
-+13 u8   angle/state byte A
-+14 u8   angle/state byte B
-+15 u8   actor-state byte = *(this+848)
-+16 u8   StateOrActionByte
-+17 u32  ActionOrResourceValue candidate = sub_5AA5C0(n9)
++00  u8   *sub_417D00()
++01  u8   byte_EE896D
++02  u8   sub_67D010()
++03  u32  dword_EE8CB4
++07  u32  n0x64_0
++0B  u8   sub_720AA0(1,0)
++0C  u16  (this+16)*3 + 0.5
++0E  u16  (this+20)*3 + 0.5
++10  u16  (this+24)*3 + 0.5
++12  u8   sub_744310()
++13  u8   derived/directional state
++14  u8   derived/directional state
++15  u8   this+848
++16  u8   derived movement/action state
++17  u32  sub_5AA5C0(n9)
 ```
 
-總長：
+總長 **27 bytes**。[C]
 
-```text
-27 bytes
-```
+### 7.2 `MoveStateFlags`
 
-### 7.2 MoveStateFlags
-
-`sub_744310()` 精確生成：
+`sub_744310()` 產生：
 
 ```text
 bit0 = (this+860 != 0 && this+860 != 4)
@@ -292,331 +309,408 @@ bit6 = (this+866 != 0)
 bit7 = (this+868 != 0)
 ```
 
-所以安全命名為：
+安全命名：
 
 ```text
 MoveStateFlags : u8
 ```
 
-各 bit 的 public semantic 仍 OPEN。
+每個 bit 的 public semantic 仍 `[OPEN]`。[C]
 
-### 7.3 StateOrActionByte
+### 7.3 Identity/state relations
 
-`n12` 基礎值來自 `n9[0]`；特殊情況：
+`sub_417D00()` 回傳 `&byte_EDBF58`；`PM_CONNECT_ACK (142)` handler `sub_5565D0()` 會以 u8 更新該位置，因此 opcode 23 `+00` 是 connection/bootstrap-derived 1-byte value。[C]
 
-```text
-n5_1 == 4 → 12
-n5_1 == 5 → 13
-(this+104) != 0 → set bit7
-```
-
-若 local actor 存在且 actor+284 != 0，則 override 成 `sub_717430()`；該函式若有 actor 回傳 actor+286，否則 28。[C]
-
-所以 Server 不應把 +16 自行枚舉成未證實的 `WeaponId` / `EmotionId`。
-
-## 8. Client/Server movement struct 必須分離
+`sub_67D010()`：
 
 ```text
-S→C:
-  opcode 8/24
-  u8 N + N×26-byte ActorRecord
-
-C→peer:
-  opcode 23
-  27-byte LocalMovementState
+n2 == 2 → -2
+otherwise → local n0x10
 ```
 
-兩者共享 identity/state/position/action 家族，但 wire layout 不同；不能重用同一個 binary struct。[C][X]
+並由 `sub_67D110()` 映射到 16-entry identity table，因此 +02 屬於 local slot/actor identity domain，exact public namespace `[OPEN]`。[C]
 
-## 9. Actor state application
+`dword_EE8CB4` 在多處以 32-bit local player identity/value 使用，包含與 incoming player number 的比較；安全命名為 local playerNo/identity candidate，不升格為 confirmed account ID。[C]
 
-`sub_602E30()` 每筆 record 最終形成：
+`n0x64_0` 是 time/tick-like gameplay value；exact unit `[OPEN]`。[C]
+
+---
+
+## 8. Client/Server movement schema 必須分離
 
 ```text
-R+0B
-  → sub_5B3180(actor, byte)
-  → actor +233
+S→C
+opcode 8 / 24
+u8 N + N × 27-byte fixed ActorRecord
++ optional nested event/effect segment
 
-R+0C..R+10
-  → /3.0
-  → transform snapshot
-  → sub_9BCB00
-
-R+16
-  → sub_5B34B0 state/action path
-
-R+17
-  → sub_5B34B0 resource/action path
+C→peer
+opcode 23
+27-byte fixed LocalMovementState
 ```
 
-`sub_5B34B0()` 的分流：
+兩者欄位寬度／offset 相互對稱，但不能重用同一個 binary struct。[C][X]
+
+---
+
+## 9. Movement-adjacent nested event/effect segment
+
+`sub_5E2570()` 讀第一個 `u8 nested_type`：
 
 ```text
-StateOrEmotionId 16..25
-    → Emotion/animation subsystem
-
-otherwise
-    → generic state/action + item/weapon/resource lookup
+type 0 → none
 ```
 
-## 10. Peer control / recovery
-
-### 10.1 UDP opcode 18 → TCP PM_CONNECT_REQ
-
-UDP receive `sub_596300()` 收到 opcode 18 後，在正常 gate 下呼叫 `sub_556530()`。
-
-`sub_556530()` 明確建立：
+### Type 1
 
 ```text
-TCP opcode 141 = PM_CONNECT_REQ
-payload = empty
+u8 type=1
+u8 value
+u8 value
+6 × u16
+= 15 bytes
 ```
 
-並透過 `sub_555090(&dword_1321D00, ...)` 發送。[C]
-
-因此已閉合：
+### Type 2
 
 ```text
-UDP opcode 18
-    → TCP PM_CONNECT_REQ (141, empty)
+u8 type=2
+u16 value
+u8 value
+6 × u16
+= 16 bytes
 ```
 
-### 10.2 Explicit symbol family 153–164
-
-Protocol registration 明確給出：
+### Type 3
 
 ```text
-153 UDP_ALL_PING_REQ
-154 UDP_ALL_PING_ACK
-155 Y_UDP_C_HOLE_INF
-156 Y_UDP_S_HOLE_INF
-157 UDP_TCP_DEAD_REQ
-158 UDP_TCP_DEAD_ACK
-159 TCP_UDP_DEAD_REQ
-160 TCP_UDP_DEAD_ACK
-161 UDP_TCP_LIVE_REQ
-162 UDP_TCP_LIVE_ACK
-163 TCP_UDP_LIVE_REQ
-164 TCP_UDP_LIVE_ACK
+u8 type=3
+u8 value
+6 × u16
+= 14 bytes
 ```
 
-但 symbol registration 不代表所有 opcode 都經同一 receive dispatcher；本 client 的 UDP `sub_595E80()` 目前直接看到的是 154、158。[C]
+### Type 4
 
-### 10.3 UDP_ALL_PING_ACK 154
+```text
+u8 type=4
+u32 value
+u32 value
+6 × float
+= 33 bytes
+```
 
-`sub_5965D0()`：
+Type 1/2/3 → runtime node type 1；type 4 → runtime node type 2。node 透過：
+
+```text
+sub_59E490(this+5387, this+5387, ..., &node)
+```
+
+進 persistent linked-list / pooled queue，因此不是 parser local temporary。[C]
+
+`sub_5E1D50()` 又將 node encode 回 type 1/2/3/4；Type 1 path 存在 vector difference → normalize → length+10 → position offset 的 geometry correction。[C]
+
+所以 nested segment 已形成：
+
+```text
+sub_5E2570 decode
+        ↕
+sub_5E1D50 encode
+```
+
+但 public gameplay event names 仍 `[OPEN]`。
+
+---
+
+## 10. Peer endpoint / handshake family
+
+16-entry player identity → endpoint table：
+
+```text
+unk_F6D584 + 240780*slot = learned endpoint blob, 16 bytes
+unk_F6D594 + 240780*slot = source/local sockaddr, 16 bytes
+dword_F6DCF4[slot] = identity mapping
+```
+
+### Opcode 4 → 5
+
+Inbound 4：
 
 ```text
 u8 count
-repeat count:
-    u8 player/peer identity
-    u32 value
+count × (u8 identity + 16-byte endpoint)
 ```
 
-再以 `dword_F6DCF4` 的 16-player table 找 slot，把 value 寫到 `dword_F6D9E8[slot]`。[C]
-
-所以 154 不是空 payload ping ACK，而是 per-peer/per-player state/value update。
-
-### 10.4 UDP 6 / 13 / 14：peer endpoint/state path
-
-`sub_5940E0()`、`sub_594A10()`、`sub_594CA0()` 都以第一個 u8 找 16-player peer entry；相關資料寫到 `F6D594` 等 per-player storage，且部分 branch 建立 opcode 6/13/14 對指定 endpoint `sendto`。[C]
-
-這是 UDP peer control plane 的重要證據：
+更新 `F6D584`、標記 `byte_F6D5B0[slot]`，並對 active non-local peer fan-out opcode 5 三次：
 
 ```text
-16 player entries
-+ endpoint/address state
-+ timestamp/state flags
+u8 local identity
+u32 n0x3E8_3
 ```
 
-## 11. Periodic packets
+同時記錄 `dword_F6D5A8[slot] = timeGetTime()`，local state=`4`。[C]
 
-### 11.1 opcode 17
+### Opcode 5 → 6
 
-`sub_596180()`：
+Inbound 5：
 
 ```text
->= 1000 ms
+u8 identity
+u32 value
+```
+
+first-arrival path：
+
+```text
+byte_F6D5A4[slot] = 1
+byte_F6D5A5[slot] = 1
+unk_F6D594[slot] = current source sockaddr
+```
+
+建立 opcode 6：
+
+```text
+u8 local identity
+u32 n0x3E8_3
+```
+
+並對 stored endpoint 發三次；incoming `u32` 在 visible handler 中未被用於 response construction。[C]
+
+### Opcode 6
+
+同樣解析 `u8 identity + u32 value`；若未 ready，建立 A4/A5 state 與 source endpoint；visible handler 沒有 outbound packet。[C]
+
+### Opcode 10 / 12 → 13
+
+10：`u8 identity + 16-byte endpoint`；12：`u8 count + N×(u8 identity + 16-byte endpoint)`。
+
+兩者更新 `F6D584`，再建立 opcode 13：
+
+```text
+u8 local identity
+u32 n0x3E8_3
+```
+
+10 是 targeted path，12 是 bulk path；兩者都可對 active peer 三次 fan-out。[C]
+
+### Opcode 13 → 14
+
+13：`u8 identity + u32 value`。first arrival 時保存 source sockaddr、A4/A5，建立 opcode 14：
+
+```text
+u8 local identity + u32 n0x3E8_3
+```
+
+14：`u8 identity + u32 value`；visible handler 主要完成 terminal/source state capture，不再建立新的 packet。[C]
+
+### Timing-like field
+
+`n0x3E8_3` 來自：
+
+```text
+timeGetTime() - dword_F2563C
+```
+
+因此安全名稱為 elapsed/timing-like handshake value；尚不能叫 RTT、nonce、sequence 或 absolute timestamp。[C]
+
+### Readiness timeouts
+
+```text
+sub_5941D0 → 3000 ms
+sub_594DA0 → 5000 ms
+```
+
+兩個門檻證明 peer table 具有兩階段時間生命週期，但正式 state labels `[OPEN]`。[C]
+
+---
+
+## 11. Ping / latency side channel
+
+### UDP 22
+
+```text
+u8 mode/record flag
+if flag == 1:
+    u8 count
+    count × (u8 identity + u32 ping-like value)
+```
+
+寫入 `dword_F6D9E8[slot]`。[C]
+
+### UDP 154
+
+```text
+u8 count
+count × (u8 identity + u8 ping-like value)
+```
+
+同樣寫入 `dword_F6D9E8[slot]`。[C]
+
+UI：
+
+```text
+sub_9A8F40(value)
+    → Ping_%d
+```
+
+thresholds：
+
+```text
+<100       → 5
+100–199    → 4
+200–299    → 3
+300–999    → 2
+1000–4999  → 1
+>=5000     → 0
+```
+
+因此 per-player latency classification 是 confirmed Client-side behavior；opcode 154 的 raw one-byte unit 仍 `[OPEN]`。
+
+---
+
+## 12. UDP recovery / health
+
+UDP opcode 18：
+
+```text
+sub_596300
+    → sub_556530
+    → TCP opcode 141 = PM_CONNECT_REQ
+    → empty payload
+```
+
+已閉合 `UDP 18 → TCP 141`。[C]
+
+### 30-second health path
+
+`sub_5934B0()`：
+
+```text
+stored timestamp == 0 → healthy
+elapsed <= 30000 ms   → healthy
+elapsed > 30000 ms    → clear + unhealthy
+```
+
+`sub_593510()` 在 `n15 == 13` 且 timeout failure 時建立：
+
+```text
+TCP opcode 697
+u16 payload = 1
+```
+
+Protocol registration：`697 = GG_CHEATER_REPORT_REQ`。
+
+Direct Client fact 是 30 秒 transport/UDP health timeout → 697；不能把 timeout 本身當成 cheating proof，server counterpart `[OPEN]`。[C]
+
+---
+
+## 13. Periodic control packets
+
+Opcode 17：
+
+```text
+sub_596180
+→ >=1000 ms
 → opcode 17
-→ sub_595900
 ```
 
-`sub_596240()` 亦建立 opcode 17，另寫入 string。[C]
+`sub_596240()` 也建立 opcode 17，並帶 string payload。[C]
 
-Exact public semantic 仍 OPEN。
-
-### 11.2 opcode 19
-
-`sub_596670()`：
+Opcode 19：
 
 ```text
-約每 500 ms
+sub_596670
+→ 約每 500 ms
 → opcode 19
-→ sub_595A10/current peer
+→ current/peer UDP path
 ```
 
-且有 retry/count-like state；超過 5 次進 escalation，不能只叫 generic heartbeat。[C][OPEN]
+另有 retry/count-like state，超過 5 次進 escalation；因此只命名為 periodic control/recovery packet，不直接叫 generic heartbeat。[C][OPEN]
 
-## 12. BulletHole cross-validation
+---
 
-### 12.1 Resource
+## 14. BulletHole cross-validation
 
-GitHub `Extracted/BulletHole/` 包含：
+`Extracted/BulletHole/` 有：
 
 ```text
 type000.dds
 type001.dds
 ...
-type2xx.dds
 ```
 
-而 `pmFile::possible_ctor_or_dtor_57()` 從：
+`pmFile::possible_ctor_or_dtor_57()` 從 `BulletHole\\type000.dds` 開始掃描，最多約 1000 個 type texture 並讀 dimensions。[C][RES]
 
-```text
-BulletHole\\type000.dds
-```
-
-開始，最多掃描 1000 個 type texture，讀取 texture dimensions。[C][RES]
-
-### 12.2 Protocol
-
-Protocol registration 存在：
+Protocol symbol registration 又有：
 
 ```text
 155 Y_UDP_C_HOLE_INF
 156 Y_UDP_S_HOLE_INF
 ```
 
-### 12.3 Wiki
-
-Wiki 的武器條目觀察到不同武器可以共享相同弾痕；例如 Paperman Of Comic 明確說弾痕與 Magic Book 相同：
-
-https://wikiwiki.jp/paperman/Paperman%20Of%20Comic%E8%A9%B3%E7%B4%B0
-
-因此目前可以高可信建立 domain-level relation：
+但本 Client 的 `sub_595E80()` direct switch 未看到 155/156，因此目前只能建立：
 
 ```text
-Y_UDP hole protocol
-    ↔ bullet-hole runtime resource family
-    ↔ observable weapon bullet-hole behavior
+BulletHole resource family exists
+↕
+protocol names 155/156 exist
 ```
 
-但 exact：
+不能自行補 exact payload、direction 或 producer。[C][RES][OPEN]
+
+---
+
+## 15. Evidence / Confidence
+
+| Conclusion | Confidence | Evidence |
+|---|---|---|
+| UDP 8/24 = `Y_UDP_S_MOVE_INF` | Confirmed | dispatcher + diagnostic string |
+| 8/24 fixed actor record = 27 bytes | Confirmed | exact parser widths + 23 producer symmetry |
+| 23 fixed payload = 27 bytes | Confirmed | `sub_744450` writers |
+| movement spatial fields are u16 ↔ /3.0 | Confirmed | decoder + encoder |
+| movement R+16 has Emotion subdomain 16..25 | Confirmed | state predicate + 10-entry emotion table |
+| R+17 is Resource/Action identity candidate | Strongly Supported | whitelist + downstream validation |
+| opcode 4/5/6/10/12/13/14 form peer maintenance family | Confirmed at Client behavior level | endpoint table + parser/serializer flows |
+| 3s / 5s readiness checks exist | Confirmed | direct clock comparisons |
+| opcode 18 → TCP 141 | Confirmed | direct call + empty serializer |
+| opcode 697 follows 30s timeout path | Confirmed | timeout + packet construction |
+| opcode 154 feeds common ping-quality state | Confirmed | parser + shared table + UI consumer |
+| opcode 155/156 correlate with BulletHole resource family | Strongly Supported | symbol registration + resource family |
+| 8/24 server-side producer | Unknown | absent from Client binary |
+| opcode 23 formal public name | Unknown | symbol closure missing |
+| exact movement field semantics beyond closed relations | Mostly OPEN | insufficient independent evidence |
+| peer timing field exact semantics | Unknown | remote value not consumed by response construction |
+
+---
+
+## 16. Remaining highest-value questions
 
 ```text
-155/156 payload schema
-weapon/action → typeXXX mapping
+A. Movement R+00/R+01/R+03/R+07/R+12/R+13/R+14/R+15 exact semantic
+B. Movement R+02 exact identity namespace
+C. Movement R+16 complete non-Emotion state/action enum
+D. Movement R+17 exact Resource/Action namespace
+E. sub_5E2570 type 1/2/3/4 exact public event mapping
+F. UDP 8/24 server-side serializer
+G. UDP 23 formal protocol name
+H. UDP 155/156 producer/consumer + BulletHole wire fields
+I. UDP 17/19 exact periodic semantics
+J. UDP 154 one-byte unit
+K. 3s/5s peer state-machine formal labels
+L. opcode 697 server counterpart
 ```
 
-仍 OPEN；不可因資源名稱直接創造 wire enum。[C][RES][WIKI][OPEN]
-
-## 13. Wiki 對 movement/state 的旁證
-
-Wiki `銃の撃ち方いろいろ` 明確描述：
+## 17. Canonical ownership
 
 ```text
-standing
-crouching
-jumping
-moving
-grenade blow-up
-falling
-being shot
+Network_Protocol.md
+    = Packet frame / integrity / compression / AES-CFB / UDP movement canonical wire truth
+
+UDP_Movement_Control_Evidence_2026-09-18.md
+    = movement / peer-control / recovery / BulletHole deep evidence appendix
+
+Network_Dispatcher_Inventory.md
+    = complete TCP opcode → handler map + dispatcher-oriented UDP evidence
 ```
 
-這些狀態會影響 crosshair state；其中 moving/jumping 等會進入較大的 crosshair 狀態。
-
-https://wikiwiki.jp/paperman/%E9%8A%83%E3%81%AE%E6%92%83%E3%81%A1%E6%96%B9%E3%81%84%E3%82%8D%E3%81%84%E3%82%8D
-
-這只證明 PaperMan 有豐富的 movement/combat state machine，不能反向把某一個 wire bit 命名成 crouch/jump/fire；所以仍維持 `[OPEN]`。
-
-## 14. 目前對 Server reconstruction 的直接影響
-
-推薦的協定 abstraction：
-
-```text
-UdpEndpointState
-    LocalEndpoint
-    CurrentPeerEndpoint
-
-UdpPacketCodec
-    FrameCodec
-    TransformCodec
-
-ServerMovementPacket8_24
-    ActorCount
-    ActorRecord[26]
-
-ClientMovementPacket23
-    SessionLike
-    ActorIdentityLike
-    TickLike
-    MoveStateFlags
-    QuantizedPosition[3]
-    AngleState[2]
-    ActorStateByte
-    StateOrActionByte
-    ActionOrResourceValue
-
-UdpControlPlane
-    AllPing
-    PeerEndpointState
-    DeadLiveRecovery
-    HoleInformation
-```
-
-不要把所有資料塞成一個 `PlayerMovementPacket`。
-
-尤其：
-
-```text
-opcode 8/24 ≠ opcode 23
-R+16 可能是 Emotion，但只有 16..25 時成立
-R+17 ≠ 已證實 WeaponId
-n16 ≠ 已證實 SlotIndex
-27000 ≠ 已證實遠端 server port
-```
-
-## 15. 本輪後仍 OPEN
-
-```text
-UDP 8/24：
-  field00/01/03/07
-  exact identity namespace
-  R+12/R+14/R+16 public axis naming
-  R+18..21 exact state/angle semantics
-  R+23 resource/action namespace
-
-UDP 23：
-  +00/+04/+06/+08 exact public semantics
-  angle/state bytes exact mode mapping
-  +15 exact actor-state enum
-  +16 generic state/action full enum
-  +17 resource/action namespace
-  all producer cadence/conditions
-
-UDP control：
-  153 sender
-  155/156 exact serializer + BulletHole type mapping
-  157/159/161/163 counterpart state machines
-  158/160/162/164 exact payloads
-  17/19 exact network/gameplay semantics
-  UDP timeout → TCP 697 counterpart
-
-TCP/Packet：
-  header +0x06
-  transform formula
-  full send queue/retry behavior
-```
-
-## 16. Evidence discipline
-
-```text
-[C]      IDA C direct evidence
-[RES]    Extracted resource evidence
-[WIKI]   PaperMan Wiki / observable behavior
-[X]      >=2 independent evidence classes agree
-[OPEN]   unresolved; do not invent enum, 0, or hardcoded semantic
-```
-
-本文件只把已由 parser/serializer、runtime consumer、resource、Wiki 交叉支持的結論提升；其餘保持 OPEN。
+同一 packet schema 只允許一份 canonical 定義；本附錄補充 function-level evidence，不維護第二套 schema。
