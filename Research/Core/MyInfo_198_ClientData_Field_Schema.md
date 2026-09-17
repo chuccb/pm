@@ -2,10 +2,9 @@
 
 > 研究目標：日本版 PaperMan 2016 年最終 Client。
 > 更新基準：2026-09-17。
->
-> 本文件整合原本 `MyInfo_198_ClientData_Field_Schema.md` 與 `MyInfo_198_Composite_Codec_Evidence.md`。現在它是 `198` 的唯一主文件：同時保存 wire schema、nested decoder、ClientData/resource 驗證與下游 MyInfo/Avatar evidence。
+> 文件角色：`198` 唯一主文件。本文只保存 198 的封包組合順序、198 特有的 Profile／MyInfo／Avatar 關聯，以及最終未閉合項目；共用 ClientData wire family 的完整結構統一見 `ClientData_Shared_Decoder_Field_Evidence.md`。
 
-## 1. 封包角色
+## 1. 封包定位
 
 ```text
 197 GL_MYINFO_REQ
@@ -15,50 +14,50 @@
     = 複合式 ClientData bootstrap / update
 ```
 
-198 不是一個扁平 struct。Client 會依固定順序串接多個可獨立驗證的 decoder：
+`sub_570550()` 顯示 198 並非單一扁平結構，而是依固定順序串接多個可獨立驗證的 decoder：
 
 ```text
-status
-→ first scalar
-→ sub_523BF0
-→ sub_524010
-→ sub_524660
-→ sub_527550
-→ sub_527D00
-→ u16
-→ u32
-→ count + variable u8 list
-→ ClientData／MyInfo／Avatar hydration
-```
-
-因此 Server reconstruction 應把 198 當成 composite codec chain，而不是一次性解析成一個猜測的大類別。
-
-## 2. 最前端 status 與 scalar
-
-`sub_570550()` 先讀取：
-
-```text
-+0x00 u8 status
-```
-
-只有 status 非零時才進入成功 bootstrap parser。接著讀取：
-
-```text
+u8  status
 u32 first_scalar
+ProfileBlock              = sub_523BF0
+AppearanceRecords         = sub_524010        // Family D
+LoadoutConfigRecords      = sub_524660        // Family A
+ItemSlotValidation        = sub_527550
+SkillSlotValidation       = sub_527D00
+u16 standalone_0
+u32 standalone_1
+u8  list_count
+u8[list_count]
+MyInfo / Avatar hydration
 ```
 
-所以目前結構至少是：
+因此 Server reconstruction 應保留這些 codec 邊界，不應把 198 做成一個巨大且無法對應 Client parser 的 struct。
+
+## 2. 198 頂層結構
+
+成功分支：
 
 ```text
-198 +0x00 = u8 status
-198 +0x01 = u32 first_scalar
++0x00  u8  status
++0x01  u32 first_scalar
++...   ProfileBlock
++...   AppearanceRecords
++...   LoadoutConfigRecords
++...   ItemSlotValidation
++...   SkillSlotValidation
++...   u16 standalone_0
++...   u32 standalone_1
++...   u8  list_count
++...   list_count × u8
 ```
 
-`first_scalar` 會進入 local ClientData/狀態 setter，因此不是 padding；但其正式公開名稱仍 `[OPEN]`。[C]
+`status == 0` 時不進入完整 bootstrap；因此後續欄位只適用於成功分支。[C]
 
-## 3. `sub_523BF0`：固定 Profile/Base Data 區塊
+`first_scalar` 確實被 ClientData／狀態 setter 使用，不是單純 padding；正式公開語意仍 `[OPEN]`。[C][OPEN]
 
-實際讀取順序是：
+## 3. `sub_523BF0`：198 特有 ProfileBlock
+
+`sub_523BF0()` 的直接讀取順序為：
 
 ```text
 ASCII-Z string
@@ -68,72 +67,56 @@ u32 × 5
 u32 × 4
 u32 × 4
 u32 × 5
-u8
-u8
-u8
+u8 × 3
 u32 × 3
 raw[48]
 u8
 ```
 
-主要 C++ object destination 分布並非單純遞增，部分欄位會透過 derived calculation 或 re-read 寫入：
+其中：
 
 ```text
 string → this +15
 u8     → this +22
-多組 u32 → +23..+51 的 profile state
-u8     → +76 / +305 / +306
+多組 u32 → +23..+51 等 Profile state
 raw[48] → +52
+部分 u8 → +76 / +305 / +306
 final u8 → +1
 ```
 
-其中 `sub_592500(..., 0x30)` 明確複製 48 bytes，因此該部分在 wire 上應保持 `raw[48]`，不能未經證據改成 12 個 u32 或字串。[C]
+`sub_592500(..., 0x30)` 明確以 48 bytes 處理最後的 raw block，因此不能因 Hex-Rays 表面型別而改寫成字串或 12 個 DWORD。[C]
 
-對應 serializer `sub_523E10()` 可寫出相同 profile object 的多組 string/u32/u8/raw block，證明這不是 receive-only 偶然結構。[C]
+對應 `sub_523E10()` 存在 serializer，可反向證明此 ProfileBlock 不是只在接收端偶然出現的記憶體形狀。[C]
 
-### 3.1 語意邊界
+目前未取得足夠唯一 consumer 將這些 Profile scalar 全部正式命名為 `Level`、`CharacterId` 等；因此維持 raw／`[OPEN]`。[C][OPEN]
 
-目前沒有足夠唯一 consumer 將所有 profile scalar 命名為 `level`、`PG`、`CASH`、`characterId` 等。這些概念雖然出現在 UI，但不能只因概念存在就替未知欄位命名。[OPEN]
+## 4. Family D：`sub_524010` Appearance / Character records
 
-## 4. `sub_524010`：20 筆複合外觀／資源記錄
+198 使用 `sub_524010()` 解析最多 20 筆記錄。
 
-開頭：
-
-```text
-u8 count
-```
-
-Client 將 count 限制在 20。
-
-每筆固定讀取：
+完整 Family D wire schema 不在本文重複；唯一真相位於：
 
 ```text
-u8  record_selector
-u16 field[0]
-u16 field[1]
-u16 field[2]
-u16 field[3]
-u16 field[4]
-u16 field[5]
-u16 field[6]
-u16 field[7]
-u16 field[8]
-u16 field[9]
-u16 field[10]
-u16 field[11]
+Research/Core/ClientData_Shared_Decoder_Field_Evidence.md
 ```
 
-所以每筆 wire record 固定：
+該 family 已閉合為：
 
 ```text
-1 + 12 × 2 = 25 bytes
+u8 count <= 20
+repeat:
+    u8  record_selector
+    u16 field[0]
+    u16 field[1]
+    ...
+    u16 field[11]
 ```
 
-Client 的 canonical in-memory storage 另有自己的 compact layout；不可把 memory stride 直接當成 wire width。
+單筆固定 **25 bytes**。[C]
 
-## 5. 20 筆記錄的 Resource Namespace 語意
+### 4.1 198 特有的 Resource namespace evidence
 
-`sub_5280F0()` 會驗證其中 11 個 u16 resource values，直接把它們轉換到不同 ClientData namespace：
+`sub_5280F0()` 對該 record 的多個 u16 執行不同 namespace 驗證，目前可直接記錄：
 
 ```text
 r[1]  → 19,900,000 + (r[1] % 100,000)
@@ -149,29 +132,15 @@ r[10] → 10,800,000 + (r[10] % 100,000)
 r[11] → 10,900,000 + (r[11] % 100,000)
 ```
 
-每個 canonical resource identity 再由 `sub_535020()` 等檢查。[C]
+這證明該記錄是多個 Resource namespace 的複合資料，而不是通用 16-bit 數值陣列。[C][X]
 
-因此已直接證明這不是通用數值陣列，而是**多個不同 Resource namespace 組合成的角色／外觀資料結構**。[C][X]
+`r[0]` 為 selector／slot 類欄位，不是 resource ID。[C]
 
-### 5.1 `r[0]`
+`r[12]` 有獨立 getter／resource path，但尚未取得足夠證據給出公開名稱，因此保持 `[OPEN]`。[C][OPEN]
 
-第一個 u8 是記錄 selector／slot index；不是 resource ID。[C]
+### 4.2 Avatar 交叉驗證
 
-### 5.2 `r[1]`
-
-屬於 19.9M namespace，可透過 ClientData getter 取回完整 resource identity。[C]
-
-### 5.3 `r[2]..r[11]`
-
-各自對應不同的 100,000-wide namespace。Client 有獨立 getter，因此不能合併成一個 generic `AvatarParts[]` 而不保留 namespace identity。[C]
-
-### 5.4 `r[12]`
-
-最後一個 u16 會被序列化，也有自己的 getter/resource path，但沒有被前述 11 個 validation rule 消費；正式公開 semantic `[OPEN]`。[C][OPEN]
-
-## 6. Avatar Resource Cross-check
-
-上述 19.9M 與 10M–10.9M namespace 最後會進入 `AVATAR` 相關 UI/resource pipeline，例如：
+這些 namespace 最終進入 `AVATAR` 相關 UI／Resource pipeline，包括：
 
 ```text
 sub_525F10
@@ -188,59 +157,50 @@ sub_526230
 sub_526280
 ```
 
-並被 `sub_4BFA50()`／`sub_6A9950(..., L"AVATAR", ...)` 等路徑使用。[C]
+並由 `sub_4BFA50()`、`sub_6A9950(..., L"AVATAR", ...)` 等路徑使用。[C]
 
-`Extracted` 同時存在 avatar、body、hair、face、set、`acc1..acc4` 等資源結構，因此可以證明這個 record family 確實與複合 Avatar/Character state 有關。[RES][X]
+`Extracted/` 中存在 avatar、body、hair、face、set、`acc1..acc4` 等資料，可作為 Resource 層旁證；但尚未足以把每一個 wire u16 一一命名成固定外觀欄位。[RES][X][OPEN]
 
-但在 wire-field 一一 mapping 尚未完全閉合前，不應把十餘個欄位直接命名成固定 wardrobe 名稱。[OPEN]
+## 5. Family A：`sub_524660` Loadout / Configuration
 
-## 7. `sub_524660`：最多四筆變長 Loadout/Configuration
+198 也會呼叫 `sub_524660()`，最多 4 筆。
 
-開頭：
+完整 wire schema 不在本文重複；請以 `ClientData_Shared_Decoder_Field_Evidence.md` 的 Family A 為唯一定義。
 
-```text
-u8 count
-```
-
-count 最大 4；每筆：
+198 只關心其在 composite chain 中的順序與 downstream validation：
 
 ```text
-u8  type
-u16 selector
-if type != 3:
-    u16 value0
-    u16 value1
-    u16 value2
-if selector != 0:
-    8 × u32 reference
+sub_524660
+    ↓
+sub_527DB0
+    ↓
+Resource / slot validation
 ```
 
-所以單筆可能是：
+Family A 的存在至少能確認與 loadout／配置資料及多個 Resource domain 有關；尚不足以把每個 u16/u32 直接命名成公開武器／技能／物品欄位。[C][OPEN]
 
-```text
-type == 3, selector == 0  → 3 bytes
-type == 3, selector != 0  → 35 bytes
-type != 3, selector == 0  → 9 bytes
-type != 3, selector != 0  → 41 bytes
-```
+## 6. Item-slot 與 Skill-slot validation
 
-這是由實際 parser/writer 結構直接閉合。[C]
+### 6.1 `sub_527550`
 
-後續透過 `sub_527DB0()` 驗證 Resource namespace；錯誤處理也明確區分 weapon/config slot。[C]
-
-## 8. `sub_527550`：9 × u32 Item-slot Resource Validation
-
-`sub_527550()` 委派給 `sub_522480()`，後者固定讀取：
+`sub_527550()` 委派 `sub_522480()`，固定讀取：
 
 ```text
 9 × u32
 ```
 
-每個非零值會對 Client Resource DB 做驗證；失敗走 error 10，而該 error 對應 `E_CRI_ERR_INVALID_ITEM_SLOT`。[C]
+非零值會向 Client Resource DB 驗證；失敗對應：
 
-因此 198 內存在獨立的「9 × u32 item-slot/resource validation component」。
+```text
+error 10
+E_CRI_ERR_INVALID_ITEM_SLOT
+```
 
-## 9. `sub_527D00`：Skill-slot Resource Validation
+因此 198 成功資料中存在一個獨立的 9 × u32 Item-slot / Resource validation component。[C]
+
+各 index 對應哪個公開物品槽位仍 `[OPEN]`。
+
+### 6.2 `sub_527D00`
 
 先讀：
 
@@ -254,118 +214,155 @@ u8 context
 7 × u32
 ```
 
-失敗對應 error 9：
+非零值會驗證 Resource；失敗對應：
 
 ```text
+error 9
 E_CRI_ERR_INVALID_SKILL_SLOT
 ```
 
-因此這一段與 9 × u32 Item-slot validation 是兩個不同資料域，不能合併。[C]
+因此它是與 Item-slot validation 分離的 Skill-slot 資料域。[C]
 
-## 10. Indexed ClientData item collection
+## 7. Indexed Item collection 的邊界
 
-`sub_524B70()` 以前已有獨立研究其結構；它具有：
-
-```text
-u32 start_index/base
-```
-
-並在有限 window 內讀取多個 entry，每個 entry 包含多個 u32、可選 u8 與 u16。其資料最後進入 28-byte canonical item record 與 Resource runtime state。[C]
-
-這一層與 `sub_524010` 的 20 筆角色／Avatar resource record 必須分開看待：
+`sub_524B70()` 是另一個明確的 ClientData item collection decoder。它不應與 Family D 的 20 筆外觀記錄混為一談：
 
 ```text
-20 × 25-byte composite appearance record
-≠
-indexed owned-item collection
+AppearanceRecords
+    = 20 × 25-byte Family D records
+
+OwnedItemCollection
+    = indexed collection handled by sub_524B70
 ```
 
-完整 Item/耐久度研究已集中於 `Character_Inventory_Equipment.md`。[C]
+`sub_524B70()` 的完整 wire family 已集中於 `ClientData_Shared_Decoder_Field_Evidence.md`；物品、耐久度與角色層語意則集中於 `Character_Inventory_Equipment.md`。[C]
 
-## 11. `sub_570550` 最後的 standalone fields
+這裡只保留 198 的關係，避免再次建立第三份 Item schema。
 
-主要 parser 後續還會讀：
+## 8. 198 最後的獨立欄位
+
+`sub_570550()` 在各 nested decoder 完成後，仍會直接讀取：
 
 ```text
 u16 standalone_0
 u32 standalone_1
-u8  count
-repeat count:
-    u8 value
+u8  list_count
+repeat min(list_count, 20):
+    u8 list_value
 ```
 
-這是一個真正的 variable-length byte list，而不是固定 20-byte buffer。
+`list_count` 有本地上限控制，資料會進入 `sub_5A9B30(...)`。
 
-Client 會以 local bound 處理並呼叫：
+這幾個欄位不是 Family A/B/C/D 的 nested record，應維持為 198 專屬尾端欄位。公開語意目前 `[OPEN]`。[C][OPEN]
+
+## 9. 198 完整 composite schema
 
 ```text
-sub_5A9B30(...)
+198 GL_MYINFO_ACK
+│
+├─ u8  status
+│
+└─ if status != 0:
+   │
+   ├─ u32 first_scalar
+   ├─ ProfileBlock                 sub_523BF0
+   ├─ AppearanceRecords            sub_524010 / Family D
+   ├─ LoadoutConfigRecords         sub_524660 / Family A
+   ├─ ItemSlotValidation           sub_527550 / 9×u32
+   ├─ SkillSlotValidation          sub_527D00 / u8 + 7×u32
+   ├─ u16 standalone_0
+   ├─ u32 standalone_1
+   ├─ u8  list_count
+   └─ list_count × u8
 ```
 
-正式 semantic 仍需繼續從 caller／consumer 確認。[C][OPEN]
+這是 198 的唯一 composite 結構描述。Family A/B/C/D 的內部格式只在共用文件維護。[C]
 
-## 12. 完整 Composite Codec 形狀
+## 10. MyInfo / Avatar hydration
 
-目前最適合的 structural schema：
+198 的意義不能只停留在 wire parser。Client 在解碼後會進入：
 
 ```text
-198
-  u8 status
-  if status != 0:
-      u32 first_scalar
-      ProfileBlock          = sub_523BF0(packet)
-      AppearanceRecords     = sub_524010(packet)   // <=20 × 25B
-      LoadoutConfigRecords  = sub_524660(packet)   // <=4, variable-size
-      ItemSlotValidation    = sub_527550(packet)   // 9 × u32
-      SkillSlotValidation   = sub_527D00(packet)   // u8 + 7 × u32
-      u16 standalone_0
-      u32 standalone_1
-      u8 list_count
-      repeat min(list_count,20):
-          u8 list_value
+INFORMATION
+    ↓
+MYINFO
+    ↓
+AVATAR / Character / Item data
 ```
 
-這比把 198 寫成單一巨大 C# class 更符合 Client 實際 parser 邊界。[C]
+並使用 `AVATAR` key、Character／ClientData object 與 Resource lookup 建立後續 UI 狀態。[C]
 
-## 13. 重要反編譯與重建規則
+因此 198 是 Login 後的實際玩家資料 bootstrap 節點之一。
 
-### Wire order 不等於 Object offset order
+## 11. Reconstruction 邊界
 
-C++ object 的欄位 offset 可能非單調排列；Server 必須遵循實際 serializer／parser 呼叫順序，不可依 object offset 重新排序。
-
-### Memory stride 不等於 Wire record size
-
-例如 20 筆外觀記錄明確是 25-byte wire records，但 Client in-memory layout 可以是不同 compact representation。
-
-### Helper prototype 不等於實際寫入寬度
-
-任何 `char`、`short` 類表面 prototype 都必須追到底層 serializer helper。例如其它 Client helper 已出現「表面是 char，底層實際寫 4 bytes」的情形；198 也必須遵循同一原則。
-
-### Resource validation 是重要 semantic evidence
-
-錯誤碼與 namespace 驗證可以證明資料域，例如：
+Server implementation 應採：
 
 ```text
-error 8  → weapon slot
-error 9  → skill slot
-error 10 → item slot
+GL_MYINFO_ACK
+    ↓
+198 codec chain
+    ├─ ProfileBlockCodec
+    ├─ AppearanceFamilyDCodec
+    ├─ LoadoutFamilyACodec
+    ├─ ItemSlotValidationCodec
+    ├─ SkillSlotValidationCodec
+    └─ 198TailFields
 ```
 
-但仍應以實際 caller/data-flow 決定單一欄位的正式名稱。
-
-## 14. 目前最重要的 OPEN 項目
+不可：
 
 ```text
-1. ProfileBlock 各 scalar 的正式公開語意
-2. 20 筆 record 的各 resource namespace 對應到哪個公開 Avatar 元件
-3. r[12] 的獨立公開語意
-4. <=4 LoadoutConfigRecords 每個 u16/u32 的正式語意
-5. 9 × u32 Item-slot validation 各 index 的公開角色
-6. 7 × u32 Skill-slot validation 各 index 的公開角色
-7. standalone u16/u32 的語意
-8. variable u8 list 的實際用途
-9. 198 與後續 MyInfo/Avatar UI 的完整 consumer mapping
-10. Server 端實際 198 sender 的 state source
+把所有 nested record 塞進一個 ClientDataRecord
 ```
 
-沒有新的 C/LST/Resource/Wiki 證據前，上述欄位維持 raw／`[OPEN]`，不可為方便 Server 實作而自行填入猜測值。
+也不可：
+
+```text
+Client object offset
+    = wire offset
+    = server database column
+```
+
+這三者必須維持獨立。
+
+## 12. Evidence / OPEN policy
+
+目前所有正式公開名稱都必須能追溯到至少一條直接資料流：
+
+```text
+serializer / parser
+    → 實際 helper width
+    → caller / callee
+    → state field / object mutation
+    → Resource / UI / Wiki
+```
+
+尚未閉合時保持：
+
+```text
+field_N
+unknown_N
+selector_value
+raw_N
+[OPEN]
+```
+
+只有 `C + Resource + caller/data-flow` 等證據真正形成閉環後，才提升 semantic 名稱。不要因 Server coding 方便而先把未知欄位填 `0`、硬編碼或 guessed enum。
+
+## 13. 198 專屬 OPEN 項目
+
+```text
+1. first_scalar 正式語意
+2. ProfileBlock 各 scalar 正式語意
+3. Family D 的 r[12]
+4. Family A 每個欄位的公開語意
+5. 9 個 Item-slot index 的公開角色
+6. 7 個 Skill-slot index 的公開角色
+7. standalone_0 / standalone_1 語意
+8. 尾端 u8 list 的用途
+9. MyInfo / Avatar hydration 的完整 consumer mapping
+10. Server 端 198 sender 的 state source
+```
+
+後續若新增證據，優先更新本文件的 198-specific 部分；共用 Family A/B/C/D 的 wire 定義只更新 `ClientData_Shared_Decoder_Field_Evidence.md`，不要再複製一份。
